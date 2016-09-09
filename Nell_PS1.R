@@ -63,7 +63,7 @@ base_tile <- {
     geom_tile(aes(width = 1e3, height = 1e3)) +
     # Asthetics...
     theme_bw() + 
-    scale_fill_gradient(low = "gray90", high = "black", guide = "colorbar") +
+    scale_fill_gradient(low = "lightblue", high = "black", guide = "colorbar") +
     theme(axis.text = element_blank(), axis.ticks = element_blank(),
           panel.grid = element_blank()) + 
     scale_x_continuous("Longitude") + 
@@ -85,8 +85,7 @@ ruf3 <- grouse_df %>%
 # --------
 # GLM
 # --------
-ruf3_glm <- ruf3 %>%
-    glm(detected ~ WIND_SPEED, binomial('logit'), data = .)
+ruf3_glm <- glm(detected ~ WIND_SPEED, binomial('logit'), data = ruf3)
 
 summary(ruf3_glm)
 AIC(ruf3_glm)
@@ -104,21 +103,16 @@ boot_ruf3_glm <- ruf3 %>%
         glm(detected ~ WIND_SPEED, binomial('logit'), data = .),
         type.predict = 'response'
     ))
-
+# Plotting it...
 ggplot(boot_ruf3_glm, aes(x = WIND_SPEED, y = detected)) + 
     geom_point() +
-    geom_line(aes(y = .fitted, group = replicate), alpha = 0.2, color = 'dodgerblue') + 
+    geom_line(aes(y = .fitted, group = replicate), alpha = 0.15, color = 'dodgerblue') + 
+    stat_smooth(method = 'glm', method.args = list(family = binomial('logit')), 
+                color = 'black') +
     # Asthetics
     theme_bw() +
     xlab(expression("Wind speed (km " * hr^{-1} * ")")) + 
     ylab("Detection of ruffed grouse")
-
-# --------
-# GLM w/ spatial autocorrelation
-# --------
-
-
-
 
 
 
@@ -126,20 +120,27 @@ ggplot(boot_ruf3_glm, aes(x = WIND_SPEED, y = detected)) +
 # GLMM
 # --------
 
-ruf3_glmm <- ruf3 %>%
-    glmer(detected ~ WIND_SPEED + (1 | ROUTE/STATION), 
-          data = ., family = binomial('logit'))
+ruf3_glmm <- glmer(detected ~ WIND_SPEED + (1 | ROUTE/STATION), 
+                   data = ruf3, family = binomial('logit'))
 
+# Various formats of output
 summary(ruf3_glmm)
 AIC(ruf3_glmm)
-
+tidy(ruf3_glmm)
 
 # Diagnostic plots??
 plot(ruf3_glmm)
 
 
 
-
+# --------
+# GLMM w/ spatial autocorrelation
+# --------
+# library('spaMM')
+# ruf3_glmm_sa <- corrHLfit(detected ~ WIND_SPEED + (1 | ROUTE/STATION) + 
+#                               Matern(1 | X_NAD83 + Y_NAD83), 
+#                           data = ruf3, family = binomial())
+# 
 
 
 
