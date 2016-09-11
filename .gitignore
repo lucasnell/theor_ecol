@@ -5,3 +5,5 @@
 .Rapp.*
 *.Rproj
 Icon?
+*.csv
+Zoo540*
