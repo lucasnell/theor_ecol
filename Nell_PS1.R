@@ -126,51 +126,15 @@ ruf3_glmm <- glmer(detected ~ WIND_SPEED + (1 | ROUTE),
 # Various formats of output
 summary(ruf3_glmm)
 AIC(ruf3_glmm)
-tidy(ruf3_glmm)
-
-
-
-
-# Variability in model predictions
-set.seed(111)
-boot_ruf3_glmm <- ruf3 %>% 
-    group_by(ROUTE) %>%
-    bootstrap(25, by_group = TRUE) %>%
-    do(augment(
-        glmer(detected ~ WIND_SPEED + (1 | ROUTE), binomial('logit'), data = .),
-        type.predict = 'response'
-    ))
-
-# Plotting it...
-ggplot(boot_ruf3_glmm, aes(x = WIND_SPEED, y = detected)) + 
-    geom_point() +
-    geom_line(aes(y = .fitted, group = replicate), alpha = 0.15, color = 'dodgerblue') + 
-    stat_smooth(method = 'glm', method.args = list(family = binomial('logit')), 
-                color = 'black') +
-    # Asthetics
-    theme_bw() +
-    xlab(expression("Wind speed (km " * hr^{-1} * ")")) + 
-    ylab("Detection of ruffed grouse")
-
-
-
+tidy(ruf3_glmm, conf.int = TRUE, conf.level = 0.95, conf.method = 'boot', 
+     nsim = 50, boot.type = 'perc')
 
 
 # Diagnostic plot
 plot(ruf3_glmm)
 
 
-# Function to compare residuals to other variables
-resid_plot <- function(model_obj, plot_x_var, y_var = 'detected') {
-    plot(plot_x_var, residuals(model_obj), 
-         col = c("blue", "red")[1 + model_obj@frame[, y_var]], 
-         xlab = deparse(substitute(plot_x_var)), 
-         ylab = 'residuals')
-    abline(h=0,lty=2,col="grey")
-}
 
-resid_plot(ruf3_glmm, predict(ruf3_glmm))
-resid_plot(ruf3_glmm, ruf3$WIND_SPEED)
 
 
 
