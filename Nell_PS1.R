@@ -123,7 +123,6 @@ ggplot(boot_ruf3_glm, aes(x = WIND_SPEED, y = detected)) +
 ruf3_glmm <- glmer(detected ~ WIND_SPEED + (1 | ROUTE), 
                    data = ruf3, family = binomial('logit'))
 
-# Various formats of output
 summary(ruf3_glmm)
 AIC(ruf3_glmm)
 tidy(ruf3_glmm, conf.int = TRUE, conf.level = 0.95, conf.method = 'boot', 
