@@ -99,7 +99,6 @@ ruf3 <- grouse_df %>%
 ruf3_glm <- glm(detected ~ WIND_SPEED, binomial('logit'), data = ruf3)
 
 summary(ruf3_glm)
-AIC(ruf3_glm)
 
 # Diagnostic plots
 par(mfrow=c(2,2))
