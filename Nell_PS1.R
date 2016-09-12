@@ -1,6 +1,6 @@
 
 # Install required packages if they're not already installed, then load
-for (f in c('dplyr', 'ggplot2', 'tidyr', 'broom', 'lme4')) {
+for (f in c('dplyr', 'ggplot2', 'tidyr', 'broom')) {
     if (!f %in% rownames(installed.packages())) {
         install.packages(f, dependencies = TRUE)
     }
@@ -48,6 +48,17 @@ grouse_df <- dat %>%
                          labels = c('Sharp-tailed Grouse', 'Ruffed Grouse', 
                                     'Wild Turkey'))
     )
+
+# To give you an idea of what I did
+dat %>% 
+    arrange(ROUTE, STATION, DATE) %>% 
+    select(ROUTE, STATION, DATE, RUGR, WITU, STGR)
+
+grouse_df %>% 
+    arrange(ROUTE, STATION, DATE) %>% 
+    select(ROUTE, STATION, DATE, species, detected)
+
+
 
 # ggplot objects relevant to all plots of spatial distributions of detections
 base_tile <- {
@@ -116,31 +127,14 @@ ggplot(boot_ruf3_glm, aes(x = WIND_SPEED, y = detected)) +
 
 
 
-# --------
-# GLMM
-# --------
-
-ruf3_glmm <- glmer(detected ~ WIND_SPEED + (1 | ROUTE), 
-                   data = ruf3, family = binomial('logit'))
-
-summary(ruf3_glmm)
-AIC(ruf3_glmm)
-tidy(ruf3_glmm, conf.int = TRUE, conf.level = 0.95, conf.method = 'boot', 
-     nsim = 50, boot.type = 'perc')
-
-
-# Diagnostic plot
-plot(ruf3_glmm)
 
 
 
 
-
-
-# # Moving this file and CSV to Box folder...
+# # Moving this file to Box folder...
 # system(
 #     paste("cd", getwd(),
-#           "&& cp grouse_data_7Sep16.csv Nell_ps1.R",
+#           "&& cp Nell_PS1.R",
 #           "~/'Box Sync/ZooEnt_540_2016/Homework Folders/L_Nell/ps1/'")
 # )
 
