@@ -22,6 +22,15 @@ for (f in c('dplyr', 'ggplot2', 'tidyr', 'broom')) {
 # happy with.
 
 
+
+
+# Pipes
+x <- 9
+f <- function(z){z+1}
+f(x)
+x %>% f()
+
+
 # =========================
 # Reading data
 # =========================
@@ -123,10 +132,6 @@ ggplot(boot_ruf3_glm, aes(x = WIND_SPEED, y = detected)) +
     theme_bw() +
     xlab(expression("Wind speed (km " * hr^{-1} * ")")) + 
     ylab("Detection of ruffed grouse")
-
-
-
-
 
 
 
