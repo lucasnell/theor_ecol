@@ -120,6 +120,7 @@ grid.draw(rbind(ggplotGrob(sim_resid2_h),
 # In estimators of sigma
 sum((sim_df$resid2.est - 1) / nrow(sim_df))
 sum((sim_df$sigma.est - 1) / nrow(sim_df))
+# sigma.est is *less* biased
 
 # In b1
 sum((sim_df$b1.est - 0) / nrow(sim_df))
@@ -131,7 +132,7 @@ sum((sim_df$b1.est - 0) / nrow(sim_df))
 # Relative
 {sum((sim_df$resid2.est - 1)^2) / nrow(sim_df)} / 
 {sum((sim_df$sigma.est - 1)^2) / nrow(sim_df)}
-
+# sigma.est is *less* efficient
 
 
 # ------------
@@ -190,6 +191,25 @@ ggplot(powers, aes(b1.true, rejected)) + geom_line()
 
 
 
+# 
+
+mult_np <- data_frame()
+set.seed(333)
+for(n in nrange){
+    output <- replicate(nsims, cont_sim(n = n, b1 = 0.2), simplify = FALSE) %>% 
+        bind_rows %>%
+        mutate(n = n)
+    mult_np <- bind_rows(mult_np, output)
+}; rm(n, output)
+
+mult_np$rejected <- mult_np$P < 0.05
+
+powers_n <- mult_np %>% 
+    group_by(n) %>% 
+    summarize(rejected = mean(rejected))
+
+ggplot(powers_n, aes(n, rejected)) + geom_line()
+
 
 
 # ==========================================================================
@@ -205,12 +225,9 @@ inv_logit <- function(x){
 }
 
 
-bin_sim <- function(b0 = 0, b1 = 0, n = 10, single_ex = FALSE) {
+bin_sim <- function(b0 = 0, b1 = 0, n = 10) {
     X <- rnorm(n = n)
     Y <- rbinom(n = n, size = 1, prob = inv_logit(b0 + b1*X))
-    if (single_ex) {
-        return(data_frame(x = X, y = Y))
-    }
     z <- lm(Y ~ X, data = NULL)
     out_df <- data_frame(
         b0.est = z$coef[1],
@@ -261,8 +278,7 @@ grid.draw(rbind(ggplotGrob(sim_resid2_h),
 # Using Mean Signed Deviation (MSD)
 
 # From simple binomial distribution (does this apply here??)
-# np(1-p); p = inv_logit(0) = 0.5
-sigma_known <- 10 * 0.5 * 0.5
+sigma_known <- 0.5 * 0.5
 
 # In estimators of sigma
 sum((sim_df$resid2.est - sigma_known) / nrow(sim_df))
@@ -299,7 +315,7 @@ nrange <- c(10, 20, 50, 100, 200, 500, 1000)
 mult_ns <- data_frame()
 set.seed(222)
 for(n in nrange){
-    output <- replicate(nsims, cont_sim(n = n), simplify = FALSE) %>% 
+    output <- replicate(nsims, bin_sim(n = n), simplify = FALSE) %>% 
         bind_rows %>%
         mutate(n = as.integer(n))
     mult_ns <- bind_rows(mult_ns, output)
@@ -324,7 +340,7 @@ b1range <- c(0, 0.1, 0.2, 0.3, 0.4, 0.5)
 mult_b1 <- data_frame()
 set.seed(333)
 for(b1 in b1range){
-    output <- replicate(nsims, cont_sim(n = 100, b1 = b1), simplify = FALSE) %>% 
+output <- replicate(nsims, bin_sim(n = 100, b1 = b1), simplify = FALSE) %>% 
         bind_rows %>%
         mutate(b1.true = b1)
     mult_b1 <- bind_rows(mult_b1, output)
