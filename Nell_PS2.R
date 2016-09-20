@@ -272,13 +272,19 @@ grid.draw(rbind(ggplotGrob(sim_resid2_h),
 
 
 
+# Lines for unbiased estimator of variance
+# sigma2 <- mean(output$sigma.est)
+# lines(sigma2*.05*(0:80), ((n-2)/sigma2)*dchisq(n*.05*(0:80), df=n-2), col="red")
+
+
 # ------------
 # Bias
 # ------------
 # Using Mean Signed Deviation (MSD)
 
-# From simple binomial distribution (does this apply here??)
+# From simple binomial distribution
 sigma_known <- 0.5 * 0.5
+# If sigma is known, then above *does* apply (otherwise, it's np(1-p))
 
 # In estimators of sigma
 sum((sim_df$resid2.est - sigma_known) / nrow(sim_df))
@@ -302,8 +308,7 @@ sum((sim_df$b1.est - 0) / nrow(sim_df))
 # ------------
 mean(sim_df$P < 0.05, na.rm = TRUE)
 
-# Not sure why there are any NaNs
-sim_df %>% filter(is.na(P))
+# There are NaNs bc at small sample sizes, sometimes you randomly get all 0s or 1s
 
 
 # ------------

@@ -1,16 +1,22 @@
 
 # Install required packages if they're not already installed, then load
-for (f in c('dplyr', 'ggplot2', 'grid')) {
+for (f in c('dplyr', 'ggplot2', 'grid', 'parallel')) {
     if (!f %in% rownames(installed.packages())) {
         install.packages(f, dependencies = TRUE)
     }
     library(f, character.only = TRUE)
 }; rm(f)
 
+
 b1range <- c(0, 0.1, 0.2, 0.3, 0.4, 0.5)
 nrange <- c(50, 100, 200, 500, 1000)
-n_b1 <- expand.grid(b1 = b1range, n = nrange) %>% as.tbl
+# Data frame of all combinations of above vectors
+n_b1 <- as.tbl(expand.grid(b1 = b1range, n = nrange))
 
+nsims <- 1000
+
+# CHANGE THIS IF YOUR COMPUTER HAS FEWER/MORE CPUs
+ncpus <- 3
 
 
 ##################################################################################
@@ -54,41 +60,6 @@ n_b1 <- expand.grid(b1 = b1range, n = nrange) %>% as.tbl
 
 
 
-
-
-##################################################################################
-# Do the following analyses using a binomial GLM
-
-# 1. Distribution of the estimator of b1
-# 2. Type I errors
-# 3. Consistency
-# 4. Power
-# 5. Do a comparison of power between the GLM and the LM
-
-# As an example of how to use glm(), try this:
-
-# inv.logit <- function(x){
-# 	exp(x)/(1 + exp(x))
-# }
-# 
-# n <- 10
-# b0 <- 0
-# b1 <- 1
-# 
-# X <- rnorm(n=n)
-# Y <- rbinom(n=n, size=1, prob=inv.logit(b0 + b1*X))
-# 
-# z <- glm(Y ~ X, family="binomial")
-# summary(z)
-# 
-# par(mfrow=c(1,1))
-# plot(Y ~ X)
-# lines(inv.logit(b0 + b1*X[order(X)]) ~ X[order(X)], col="red")
-# lines(inv.logit(z$coef[1] + z$coef[2]*X[order(X)]) ~ X[order(X)], col="blue")
-
-
-
-
 # ==========================================================================
 # ==========================================================================
 
@@ -97,14 +68,13 @@ n_b1 <- expand.grid(b1 = b1range, n = nrange) %>% as.tbl
 # ==========================================================================
 # ==========================================================================
 
+
+# ------------
+# Base functions
+# ------------
 inv_logit <- function(x){
     exp(x)/(1 + exp(x))
 }
-logit <- function(x){
-    log(x/(1 - x))
-}
-
-
 
 bin_sim <- function(b0 = 0, b1 = 0, n = 10, lm_too = FALSE) {
     X <- rnorm(n = n)
@@ -134,20 +104,20 @@ bin_sim <- function(b0 = 0, b1 = 0, n = 10, lm_too = FALSE) {
     }
 }
 
-nsims <- 1000
 
-set.seed(111)
-sim_df <- replicate(nsims, bin_sim(), simplify = FALSE) %>% 
-    bind_rows %>% filter(abs(b1.est) < 10)
 
 
 # ------------
 # Distribution of the estimator of b1
 # ------------
 
+# 1. Investigate the distribution of the GLM estimator of b1. Is it biased? What is 
+# the distribution? Normal? How does the distribution change with the true (simulated)
+# value of b1? 
+
 
 set.seed(111)
-b1_sims <- lapply(b1range, 
+b1_sims <- lapply(c(b1range, 0.8), 
        function(b){
            replicate(nsims, bin_sim(b1 = b), simplify = FALSE) %>%
                bind_rows %>%
@@ -161,82 +131,30 @@ b1_sims %>%
     ggplot(aes(x = b1.est, fill = factor(b1.true))) +
     geom_histogram(bins = 100) +
     geom_vline(aes(xintercept = b1.true), linetype = 3) +
-    facet_grid(b1.true ~ .)
+    facet_grid(b1.true ~ ., scales = 'free_y') + 
+    theme_bw() +
+    theme(legend.position = 'none',
+          axis.text.y = element_blank(), axis.ticks.y = element_blank())
+
+
+
 
 # Seems mostly normal, but right skewed, especially at higher b1
 # Doesn't seem biased
 
 
 
-# ------------
-# Two estimates of sigma
-# ------------
-
-# I believe this is the expected value of sigma here
-# np(1-p); where E(p) = 0 and n = 10
-sigma_exp <- 10 * 0.5^2
-
-# Residual sum of squares
-sim_resid2_h <- ggplot(sim_df, aes(resid2.est)) + 
-    geom_histogram(bins = 30, fill = 'red') +
-    geom_vline(aes(xintercept = sigma_exp), linetype= 3) +
-    ggtitle(paste('mean =', sprintf("%.3f", mean(sim_df$resid2.est)),
-                  ' sd =', sprintf("%.3f", sd(sim_df$resid2.est)))) + 
-    coord_cartesian(xlim = c(0, 22.5), ylim = c(0, 475))
-
-# Sigma: estimated variance of the random error
-sim_sigma_h <- ggplot(sim_df, aes(sigma.est)) + 
-    geom_histogram(bins = 30, fill = 'blue') +
-    geom_vline(aes(xintercept = sigma_exp), linetype= 3) +
-    ggtitle(paste('mean =', sprintf("%.3f", mean(sim_df$sigma.est)),
-                  ' sd =', sprintf("%.3f", sd(sim_df$sigma.est)))) + 
-    coord_cartesian(xlim = c(0, 22.5), ylim = c(0, 475))
-
-grid.newpage()
-grid.draw(rbind(ggplotGrob(sim_resid2_h), 
-                ggplotGrob(sim_sigma_h), 
-                size = "last"))
-
-
-# So these are overdispersed?? Weird.
-
-
-
-
-
-# ------------
-# Bias
-# ------------
-# Using Mean Signed Deviation (MSD)
-
-# In estimators of sigma
-sum((sim_df$resid2.est - sigma_exp) / nrow(sim_df))
-sum((sim_df$sigma.est - sigma_exp) / nrow(sim_df))
-
-# In b1
-sum((sim_df$b1.est - 0) / nrow(sim_df))
-
-
-# ------------
-# Efficiency
-# ------------
-# Relative
-{sum((sim_df$resid2.est - sigma_exp)^2) / nrow(sim_df)} /
-{sum((sim_df$sigma.est - sigma_exp)^2) / nrow(sim_df)}
-
-
 
 # ------------
 # Type I errors
 # ------------
-mean(sim_df$P < 0.05, na.rm = TRUE)
 
 # 2. Check the type I errors. Does type I error control depend on n? How would this 
 # affect your interpretation of p-values in your analyses?
 
-
-set.seed(333)
-typeI <- lapply(nrange, 
+# Added n=10 for comparison with very low sample size
+set.seed(222)
+typeI <- lapply(c(10, nrange), 
                 function(n_i){
                     replicate(nsims, bin_sim(n = n_i), simplify = FALSE) %>%
                         bind_rows %>%
@@ -251,7 +169,19 @@ typeI <- lapply(nrange,
 typeI %>% 
     group_by(n) %>% 
     summarize(typeI = mean(P < 0.05, na.rm = TRUE)) %>% 
-    ggplot(aes(n, typeI)) + geom_line()
+    ggplot(aes(n, typeI)) + 
+    geom_line() + 
+    geom_hline(yintercept = 0.05, linetype = 3)
+
+
+# Type I does appear to change much after n=50, but at n=10 it was 0.00!
+
+# I'd obviously not feel comfortable saying that smaller sample sizes eliminate Type I
+# error. It's probably more likely that at such small sample sizes, our power is 
+# incredibly low, so we're not rejecting *anything*.
+
+
+
 
 
 # ------------
@@ -261,18 +191,46 @@ typeI %>%
 # Check the GLM estimator of b1 for consistency in the range `nrange`
 # Does the variance in the estimator depend on the true value of b1?
 
-set.seed(444)
-consist <- lapply(seq(nrow(n_b1)), 
+set.seed(333)
+consist <- lapply(seq(nrow(n_b1)),
                   function(i){
                       n_i <- n_b1$n[i]
                       b1_i <- n_b1$b1[i]
-                      replicate(nsims, bin_sim(n = n_i, b1 = b1_i), simplify = FALSE) %>%
+                      replicate(nsims, bin_sim(n = n_i, b1 = b1_i),
+                                simplify = FALSE) %>%
                           bind_rows %>%
                           mutate(n = n_i, b1.true = b1_i) %>%
                           filter(abs(b1.est) < 10)
                   }
-    ) %>% 
+    ) %>%
     bind_rows
+
+
+# RNGkind("L'Ecuyer-CMRG")
+# set.seed(333)
+# consist <- mclapply(seq(nrow(n_b1)), 
+#                      function(i){
+#                          n_i <- n_b1$n[i]
+#                          b1_i <- n_b1$b1[i]
+#                          replicate(nsims, bin_sim(n = n_i, b1 = b1_i), 
+#                                    simplify = FALSE) %>%
+#                              bind_rows %>%
+#                              mutate(n = n_i, b1.true = b1_i) %>%
+#                              filter(abs(b1.est) < 10)
+#                      },
+#                      mc.cores = ncpus) %>% 
+#     bind_rows
+# 
+# # My parallelization results:
+# 
+# # Using standard lapply...
+# # user  system elapsed 
+# # 101.563   1.154 103.290
+# 
+# # Using mclapply with 3 cores...
+# # user  system elapsed 
+# # 88.993   1.093  48.116
+
 
 
 consist %>% 
@@ -284,36 +242,93 @@ consist %>%
 
 
 
+
+
+
+
+
+
 # ------------
 # Power
 # ------------
 
 
 # 4. Compare the power of GLMs and LMs with the same data sets (i.e., in the loop over
-# simulated data sets, test the hypothesis H0: b1 = 0 with both LM and GLM). Is the 
-# GLM more or less powerful than the LM? Does the difference depend on the sample size 
+# simulated data sets, test the hypothesis H0: b1 = 0 with both LM and GLM). Is the
+# GLM more or less powerful than the LM? Does the difference depend on the sample size
 # n?
 
 
+set.seed(444)
+powers <- lapply(seq(nrow(n_b1)),
+                  function(i){
+                      n_i <- n_b1$n[i]
+                      b1_i <- n_b1$b1[i]
+                      replicate(nsims, bin_sim(n = n_i, b1 = b1_i, lm_too = TRUE),
+                                simplify = FALSE) %>%
+                          bind_rows %>%
+                          mutate(n = n_i, b1.true = b1_i) %>%
+                          filter(abs(b1.est) < 10)
+                  }
+    ) %>%
+    bind_rows
 
-mult_b1 <- data_frame()
-set.seed(333)
-for(b1 in b1range){
-    output <- replicate(nsims, bin_sim(n = 100, b1 = b1), simplify = FALSE) %>% 
-        bind_rows %>%
-        mutate(b1.true = b1)
-    mult_b1 <- bind_rows(mult_b1, output)
-}; rm(b1, output)
+powers$rejected <- powers$P < 0.05
 
-mult_b1$rejected <- mult_b1$P < 0.05
+powers_sum <- powers %>%
+    group_by(method, n, b1.true) %>%
+    summarize(rejected = mean(rejected)) %>% 
+    ungroup
+powers_sum
 
-powers <- mult_b1 %>% 
-    group_by(b1.true) %>% 
-    summarize(rejected = mean(rejected))
-powers
 
-ggplot(powers, aes(b1.true, rejected)) + geom_line()
 
+lm_plot <- powers_sum %>% 
+    filter(method == 'lm') %>% 
+    ggplot(aes(n, rejected, color = factor(b1.true))) + 
+    geom_line() +
+    theme_bw()
+glm_plot <- powers_sum %>% 
+    filter(method == 'glm') %>% 
+    ggplot(aes(n, rejected, color = factor(b1.true))) + 
+    geom_line() +
+    theme_bw()
+
+
+grid.newpage()
+grid.draw(rbind(ggplotGrob(lm_plot), 
+                ggplotGrob(glm_plot), 
+                size = "last"))
+
+
+
+# I see no difference whatsoever.
+
+
+
+
+
+
+
+# ========================================================================================
+# ========================================================================================
+# ========================================================================================
+# ========================================================================================
+# ========================================================================================
+# ========================================================================================
+# ========================================================================================
+# ========================================================================================
+# ========================================================================================
+# ========================================================================================
+
+
+
+# # Moving this file to Box folder...
+# system(
+#     paste("cd", getwd(),
+#           "&& cp Nell_PS3.R",
+#           "~/'Box Sync/ZooEnt_540_2016/Homework Folders/L_Nell/'")
+# )
 
 
 
