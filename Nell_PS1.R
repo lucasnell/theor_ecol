@@ -139,6 +139,6 @@ ggplot(boot_ruf3_glm, aes(x = WIND_SPEED, y = detected)) +
 # system(
 #     paste("cd", getwd(),
 #           "&& cp Nell_PS1.R",
-#           "~/'Box Sync/ZooEnt_540_2016/Homework Folders/L_Nell/ps1/'")
+#           "~/'Box Sync/ZooEnt_540_2016/Homework Folders/L_Nell/'")
 # )
 

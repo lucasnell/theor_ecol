@@ -152,14 +152,14 @@ b1_sims %>%
 # 2. Check the type I errors. Does type I error control depend on n? How would this 
 # affect your interpretation of p-values in your analyses?
 
-# Added n=10 for comparison with very low sample size
+# Added n=10,20 for comparison with very low sample size
 set.seed(222)
-typeI <- lapply(c(10, nrange), 
+typeI <- lapply(c(10, 20, nrange), 
                 function(n_i){
                     replicate(nsims, bin_sim(n = n_i), simplify = FALSE) %>%
                         bind_rows %>%
-                        mutate(n = n_i) %>%
-                        filter(abs(b1.est) < 10)
+                        mutate(n = n_i)# %>%
+                        # filter(abs(b1.est) < 10)
                 }
     ) %>% 
     bind_rows
@@ -174,13 +174,15 @@ typeI %>%
     geom_hline(yintercept = 0.05, linetype = 3)
 
 
-# Type I does appear to change much after n=50, but at n=10 it was 0.00!
+# Type I does appear to change much after n=50, but at n=20 it was 0.022 and 
+# at n=10 it was 0.00!
 
 # I'd obviously not feel comfortable saying that smaller sample sizes eliminate Type I
 # error. It's probably more likely that at such small sample sizes, our power is 
 # incredibly low, so we're not rejecting *anything*.
 
-
+# 9-21 --> Sample sizes *should not* influence Type I error. Something is wrong with 
+# our statistic in this case.
 
 
 
@@ -208,17 +210,17 @@ consist <- lapply(seq(nrow(n_b1)),
 
 # RNGkind("L'Ecuyer-CMRG")
 # set.seed(333)
-# consist <- mclapply(seq(nrow(n_b1)), 
+# consist <- mclapply(seq(nrow(n_b1)),
 #                      function(i){
 #                          n_i <- n_b1$n[i]
 #                          b1_i <- n_b1$b1[i]
-#                          replicate(nsims, bin_sim(n = n_i, b1 = b1_i), 
+#                          replicate(nsims, bin_sim(n = n_i, b1 = b1_i),
 #                                    simplify = FALSE) %>%
 #                              bind_rows %>%
 #                              mutate(n = n_i, b1.true = b1_i) %>%
 #                              filter(abs(b1.est) < 10)
 #                      },
-#                      mc.cores = ncpus) %>% 
+#                      mc.cores = ncpus) %>%
 #     bind_rows
 # 
 # # My parallelization results:
@@ -282,27 +284,23 @@ powers_sum <- powers %>%
 powers_sum
 
 
-
-lm_plot <- powers_sum %>% 
-    filter(method == 'lm') %>% 
-    ggplot(aes(n, rejected, color = factor(b1.true))) + 
+powers_sum %>% 
+    ggplot(aes(n, rejected, color = factor(method))) + 
     geom_line() +
-    theme_bw()
-glm_plot <- powers_sum %>% 
-    filter(method == 'glm') %>% 
-    ggplot(aes(n, rejected, color = factor(b1.true))) + 
+    theme_bw() + 
+    facet_grid(. ~ b1.true)
+
+
+powers_sum %>% 
+    ggplot(aes(b1.true, rejected, color = factor(method))) + 
     geom_line() +
-    theme_bw()
-
-
-grid.newpage()
-grid.draw(rbind(ggplotGrob(lm_plot), 
-                ggplotGrob(glm_plot), 
-                size = "last"))
+    theme_bw() + 
+    facet_grid(. ~ n)
 
 
 
-# I see no difference whatsoever.
+
+
 
 
 

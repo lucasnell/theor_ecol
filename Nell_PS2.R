@@ -386,9 +386,8 @@ ggplot(powers, aes(b1.true, rejected)) + geom_line()
 
 # # Moving this file to Box folder...
 # system(
-#     paste("mkdir -p ~/'Box Sync/ZooEnt_540_2016/Homework Folders/L_Nell/ps2/' &&",
-#           "cd", getwd(),
+#     paste("cd", getwd(),
 #           "&& cp Nell_PS2.R",
-#           "~/'Box Sync/ZooEnt_540_2016/Homework Folders/L_Nell/ps2/'")
+#           "~/'Box Sync/ZooEnt_540_2016/Homework Folders/L_Nell/'")
 # )
 
