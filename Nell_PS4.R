@@ -104,6 +104,8 @@ g3_by_route %>%
 # ========================================================================================
 
 
+
+
 # Simulate data w with a beta-binomial at the route level
 beta_b_sim <- function(ns, xs, b0, b1, theta) {
     # Inner function to do a single route's simulation
@@ -146,13 +148,11 @@ pt_sims <- mapply(function(p, t) {
 
 
 
-
-pt_sims %>% 
-    ggplot(aes(RUGR/STATIONS)) +
+ggplot(data = pt_sims, aes(x = RUGR/STATIONS)) +
     geom_density(data = g3_by_route, color= 'red') +
     geom_density() +
     theme_bw() +
-    facet_wrap(~SCENARIO, ncol = 4, scales = 'free_y')
+    facet_wrap( ~ SCENARIO, ncol = 4, scales = 'free_y')
 
 
 # From these, I'd say p = 0.15 and theta = 10, 
@@ -179,8 +179,8 @@ lnorm_b_sim <- function(groups, xs, b0, b1, sd) {
     group_sim <- function(group_i) {
         xs_i <- xs[groups == group_i]
         n <- length(xs_i)
-        prob_route <- rnorm(n = 1, mean = 0, sd = sd)
-        prob_obs <- inv_logit(b0 + (b1 * xs_i) + prob_route)
+        E <- rnorm(n = 1, mean = 0, sd = sd)
+        prob_obs <- inv_logit(b0 + (b1 * xs_i) + E)
         rbinom(n = n, size = 1, prob = prob_obs)
     }
     
@@ -190,7 +190,7 @@ lnorm_b_sim <- function(groups, xs, b0, b1, sd) {
         unq_groups <- unique(groups)
     }
     
-    c(sapply(unq_groups, group_sim, USE.NAMES = FALSE), recursive = TRUE)
+    c(lapply(unq_groups, group_sim), recursive = TRUE)
 }
 
 
@@ -330,7 +330,7 @@ comp_beta_b %>%
 
 
 
-# They appear to estimate the same thing, and I don't detect any major biases
+# They appear to estimate the same thing, although there may be a slight bias
 
 
 # Changing theta
@@ -357,12 +357,13 @@ theta_sims <- lapply(
 theta_sims %>% 
     ggplot(aes(b1.est, color = method, linetype = method)) +
     geom_freqpoly(bins = 50, size = 0.75) +
-    geom_vline(xintercept = 0, linetype = 3) +
+    geom_vline(xintercept = b1, linetype = 3) +
     theme_bw() +
     scale_linetype_manual(values = c(1, 3, 2)) +
     facet_wrap( ~ theta, ncol = 1, scales = 'free_y')
 
 # At theta = 0, both glm models don't have as much variance in b1.est as the linear model
+
 
 
 
@@ -461,6 +462,9 @@ b1_sims %>%
 
 
 
+# NOTE: For binary data, unnecessary to use quasibinomial, bc binary data cannot 
+# have higher/lower variance than p*(1-p)
+
 # -----------------------
 # 6. Investigate the distribution of the LM, binomial GLM, and quasibinomial GLM 
 # estimators of b1. Do they estimate the same thing? Are the GLM estimators biased? 
@@ -470,6 +474,7 @@ b1_sims %>%
 
 b0_true <- -4
 sd_true <- 4
+b1_true <- 0
 
 nsims <- 1000
 
@@ -484,7 +489,7 @@ sd_sims <- lapply(
                                lnorm_b_sim, 
                                groups = g3$ROUTE, 
                                xs = g3$WINDSPEEDSQR, 
-                               b0 = b0_true, b1 = 0, sd = sd_i), 
+                               b0 = b0_true, b1 = b1_true, sd = sd_i), 
                   simplify = FALSE) %>% 
             bind_rows %>% 
             mutate(sd.true = sd_i)
@@ -497,7 +502,7 @@ sd_sims <- lapply(
 sd_sims %>% 
     ggplot(aes(b1.est, color = method, linetype = method)) +
     geom_freqpoly(bins = 50, size = 0.75) +
-    geom_vline(xintercept = 0, linetype = 3) +
+    geom_vline(xintercept = b1_true, linetype = 3) +
     theme_bw() +
     scale_linetype_manual(values = c(1, 3, 2)) +
     facet_wrap( ~ sd.true, ncol = 1, scales = 'free_y')
@@ -525,7 +530,7 @@ sd_sims %>%
     ungroup %>% 
     mutate(sd.true = as.numeric(paste(sd.true))) %T>% 
     print(.) %>% 
-    ggplot(aes(sd.true, typeI, color = method)) + 
+    ggplot(aes(sd.true, typeI, color = method, linetype = method)) + 
     geom_line(size = 1) +
     theme_bw() +
     geom_hline(yintercept = 0.05, linetype = 3)
@@ -534,11 +539,12 @@ sd_sims %>%
 # All models have *way* higher type I error than they should, and that increases with 
 # higher sd
 
-# You'd have to lower your cutoff if using this distribution:
+# Nonindependence gives higher type I error!
+
+# You'd have to lower your cutoffs:
 
 sd_sims %>% 
-    filter(method == 'glm') %>% 
-    group_by(sd.true) %>% 
+    group_by(method, sd.true) %>% 
     summarize(alpha = quantile(P, probs = 0.05))
 
 
