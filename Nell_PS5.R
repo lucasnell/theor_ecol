@@ -163,8 +163,8 @@ comp_methods <- function(x_vec, me_vec, sim_fun, ...) {
 # as you increase the route-to-route variation (increase sd.RUGR)? 
 # -----------------
 
-# The GLM and GLMM appear to estimate the same thing, as do LM and LMM, although LMM
-# do appear to have a *slight* difference in the distribution.
+# The GLM and GLMM appear to estimate the same thing, as do LM and LMM.
+# GLM/GLMM are pretty biased.
 
 # Both mixed effects models seem to *maybe* have greater variability in b1 estimators 
 # when sd increases.
@@ -257,8 +257,26 @@ power_sims <- mclapply(
     bind_rows
 s1 <- Sys.time()
 s1 - s0
-# Time difference of 22.83665 mins
+# Time difference of 22.83665 mins (on my machine)
 
+# If using > 6 cores
+RNGkind("L'Ecuyer-CMRG")
+set.seed(111)
+s0 <- Sys.time()
+power_sims <- mclapply(
+    1:nsims, 
+    function(i){
+        lapply(b1_range, 
+               function(b1_i){
+                   comp_methods(g3$WINDSPEEDSQR, g3$ROUTE, lnorm_b_sim, 
+                                g3$ROUTE, g3$WINDSPEEDSQR,
+                                b0_true, b1_i, sd_true)
+               }) %>% 
+            bind_rows
+    }, mc.cores = ncpus) %>% 
+    bind_rows
+s1 <- Sys.time()
+s1 - s0
 
 
 
