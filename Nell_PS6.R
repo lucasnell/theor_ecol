@@ -1,7 +1,7 @@
 
 # Install required packages if they're not already installed, then load
 for (f in c('magrittr', 'dplyr', 'readr', 'tidyr', 'ggplot2', 'parallel', 'lme4', 
-            'lmerTest', 'broom')) {
+            'lmerTest', 'car')) {
     if (!f %in% rownames(installed.packages())) {
         install.packages(f, dependencies = TRUE)
     }
@@ -24,28 +24,99 @@ logit <- function(x){
 ncpus <- 3
 
 
+library(Rcpp)
+library(RcppArmadillo)
+
+n <- 1000
+cppFunction('NumericVector cppNorm(const int n) { NumericVector x = rnorm(n); return x; }')
+cppFunction('arma::vec armNorm(const int N) { 
+                      arma::vec x = arma::randn(N,1); 
+                      return x; 
+                      }', 
+                      depends = "RcppArmadillo")
+
+cppFunction('NumericVector cppBinom(const int n) { 
+            NumericVector x = rbinom(n, 1, 0.5); 
+            return x; 
+            }')
+
+system.time(replicate(10000, cppNorm(n)))
+system.time(replicate(10000, armNorm(n)))
+system.time(replicate(10000, rnorm(n)))
+
+
+system.time(replicate(100000, cppBinom(n)))
+system.time(replicate(100000, rbinom(n, 1, 0.5)))
+
+
+
+
+# Input to "tidy" data frame with WIND_SPEED^0.5
+grouse_df <- read_csv(file = "grouse_data_7Sep16.csv", 
+                      col_types = paste0(c(rep('?', 12), 'c', rep('?', 17)), 
+                                         collapse = '')) %>%
+    mutate(DATE = as.Date(DATE, format = "%d-%b"),
+           WINDSPEEDSQR = sqrt(WIND_SPEED)) %>%
+    mutate_each(funs(as.factor), STATION, PERIOD) %>%
+    gather(species, detected, RUGR, WITU, STGR) %>%
+    mutate(
+        species = factor(species, levels = c('STGR', 'RUGR', 'WITU'), 
+                         labels = c('Sharp-tailed Grouse', 'Ruffed Grouse', 
+                                    'Wild Turkey'))
+    )
+
+
+g3 <- grouse_df %>% 
+    filter(PERIOD == 3)
+
+
+
+
+
 
 ##################################################################################
 # PS6: LMMs and GLMMs
 ##################################################################################
 # Questions (which are repeated below):
 
-# 1. Compare three methods for analyzing a linear model with 10 routes and 20 stations per route, with routes having the same intercept but different slopes: the methods are (i) 10 separate linear models, (ii) a single linear model with categorical terms for route and route:slope interactions, and (iii) a linear mixed model with route as a random effect for both slope and intercept. For the simulations, set b0.mean <- 1, b0.sd <- 0, b1.mean <- .2, b1.sd <- .05, and e.sd <- 0.1. What are the mean and variance in slopes calculated with each of the three methods?
+# 1. Compare three methods for analyzing a linear model with 10 routes and 20 stations 
+# per route, with routes having the same intercept but different slopes: the methods 
+# are (i) 10 separate linear models, (ii) a single linear model with categorical terms 
+# for route and route:slope interactions, and (iii) a linear mixed model with route as 
+# a random effect for both slope and intercept. For the simulations, set b0.mean <- 1, 
+# b0.sd <- 0, b1.mean <- .2, b1.sd <- .05, and e.sd <- 0.1. What are the mean and 
+# variance in slopes calculated with each of the three methods?
 
-# 2. Compare two methods for analyzing a linear model with 10 routes and 20 stations per route, with routes having the same slope but different intercepts: the methods are (i) a single linear model with categorical terms for route, and (ii) a linear mixed model with route as a random effect. For the simulations, set b0.mean <- 1, b0.sd <- 1, b1.mean <- .2, b1.sd <- 0, and e.sd <- 1. Note that you will also have to change the models for fitting the data. Which method gives on average the lowest P-values for the significance of the slope? You will have to run the simulations several times for this.
+# 2. Compare two methods for analyzing a linear model with 10 routes and 20 stations 
+# per route, with routes having the same slope but different intercepts: the methods 
+# are (i) a single linear model with categorical terms for route, and (ii) a linear 
+# mixed model with route as a random effect. For the simulations, set b0.mean <- 1, 
+# b0.sd <- 1, b1.mean <- .2, b1.sd <- 0, and e.sd <- 1. Note that you will also have 
+# to change the models for fitting the data. Which method gives on average the lowest 
+# P-values for the significance of the slope? You will have to run the simulations 
+# several times for this.
 
-# 3. Compare three methods for analyzing a binary model with 10 routes and 20 stations per route, with routes having different slopes: the methods are (i) 10 separate linear models, (ii) a single linear model with categorical terms for route and route:slope interactions, and (iii) a linear mixed model with route as a random effect for both slope and intercept. For the simulations, set b0.mean <- 0, b0.sd <- 0, b1.mean <- 1, and b1.sd <- .5. What are the mean and variance in slopes calculated with each of the three methods? Are the patterns you get different from those in questions #1 for linear models?
+# 3. Compare three methods for analyzing a binary model with 10 routes and 20 stations 
+# per route, with routes having different slopes: the methods are (i) 10 separate 
+# linear models, (ii) a single linear model with categorical terms for route and 
+# route:slope interactions, and (iii) a linear mixed model with route as a random 
+# effect for both slope and intercept. For the simulations, set b0.mean <- 0, 
+# b0.sd <- 0, b1.mean <- 1, and b1.sd <- .5. What are the mean and variance in slopes 
+# calculated with each of the three methods? Are the patterns you get different from 
+# those in questions #1 for linear models?
 
-# 4. Compare two methods for analyzing a binary model with 10 routes and 20 stations per route, with routes having the same slope but different intercepts: the methods are (i) a single linear model with categorical terms for route, and (ii) a linear mixed model with route as a random effect. For the simulations, set b0.mean <- 0, b0.sd <- .5, b1.mean <- .2, and b1.sd <- 0. Note that you will also have to change the models for fitting the data. Which method gives on average the lowest P-values for the significance of the slope? You will have to run the simulations several times for this.
+# 4. Compare two methods for analyzing a binary model with 10 routes and 20 stations per 
+# route, with routes having the same slope but different intercepts: the methods are (i) 
+# a single linear model with categorical terms for route, and (ii) a linear mixed model 
+# with route as a random effect. For the simulations, set b0.mean <- 0, b0.sd <- .5, 
+# b1.mean <- .2, and b1.sd <- 0. Note that you will also have to change the models for 
+# fitting the data. Which method gives on average the lowest P-values for the 
+# significance of the slope? You will have to run the simulations several times for this.
 
-# 5. Bonus (optional) question: Write code and check the type I error rate for the glmm testing the hypothesis that there is no variance in the slopes among routes when there is variation in the intercept.
+# 5. Bonus (optional) question: Write code and check the type I error rate for the glmm 
+# testing the hypothesis that there is no variance in the slopes among routes when 
+# there is variation in the intercept.
 
-library(lme4)
-library(lmerTest)
-
-# Anova() in {car} works better than anova() in {base}
-install.packages("car")
-library(car)
 
 ####################################################################
 # NOTE: lmer() likes it better with nstations=20, so I changed it to this. But there are still sometimes error messages. Just ignore them.
@@ -126,10 +197,22 @@ P.value
 # This does the same in lmerTest
 rand(z.lmm)
 
-# 1. Compare three methods for analyzing a linear model with 10 routes and 10 stations per route, with routes having the same intercept but different slopes: the methods are (i) 10 separate linear models, (ii) a single linear model with categorical terms for route and route:slope interactions, and (iii) a linear mixed model with route as a random effect for both slope and intercept. For the simulations, set b0.mean <- 1, b0.sd <- 0, b1.mean <- .2, b1.sd <- .05, and e.sd <- 0.1. What are the mean and variance in slopes calculated with each of the three methods?
+# 1. Compare three methods for analyzing a linear model with 10 routes and 20 stations 
+# per route, with routes having the same intercept but different slopes: the methods 
+# are (i) 10 separate linear models, (ii) a single linear model with categorical terms 
+# for route and route:slope interactions, and (iii) a linear mixed model with route as 
+# a random effect for both slope and intercept. For the simulations, set b0.mean <- 1, 
+# b0.sd <- 0, b1.mean <- .2, b1.sd <- .05, and e.sd <- 0.1. What are the mean and 
+# variance in slopes calculated with each of the three methods?
 
-# 2. Compare two methods for analyzing a linear model with 10 routes and 10 stations per route, with routes having the same slope but different intercepts: the methods are (i) a single linear model with categorical terms for route, and (ii) a linear mixed model with route as a random effect. For the simulations, set b0.mean <- 1, b0.sd <- 1, b1.mean <- .2, b1.sd <- 0, and e.sd <- 1. Note that you will also have to change the models for fitting the data. Which method gives on average the lowest P-values for the significance of the slope? You will have to run the simulations several times for this.
-
+# 2. Compare two methods for analyzing a linear model with 10 routes and 20 stations 
+# per route, with routes having the same slope but different intercepts: the methods 
+# are (i) a single linear model with categorical terms for route, and (ii) a linear 
+# mixed model with route as a random effect. For the simulations, set b0.mean <- 1, 
+# b0.sd <- 1, b1.mean <- .2, b1.sd <- 0, and e.sd <- 1. Note that you will also have 
+# to change the models for fitting the data. Which method gives on average the lowest 
+# P-values for the significance of the slope? You will have to run the simulations 
+# several times for this.
 
 ####################################################################
 # Binary GLMM with variation in the intercept and slope
@@ -215,8 +298,26 @@ z0.glmm <- glmer(Y ~ X + (1 | route), family = "binomial", data = d, glmerContro
 P.value <- pchisq(2*(logLik(z.glmm) - logLik(z0.glmm)), df=2, lower.tail = F)
 P.value
 
-# 3. Compare three methods for analyzing a binary model with 10 routes and 20 stations per route, with routes having different slopes: the methods are (i) 10 separate linear models, (ii) a single linear model with categorical terms for route and route:slope interactions, and (iii) a linear mixed model with route as a random effect for both slope and intercept. For the simulations, set b0.mean <- 0, b0.sd <- 0, b1.mean <- 1, and b1.sd <- .5. What are the mean and variance in slopes calculated with each of the three methods? Are the patterns you get different from those in questions #1 for linear models?
 
-# 4. Compare two methods for analyzing a binary model with 10 routes and 20 stations per route, with routes having the same slope but different intercepts: the methods are (i) a single linear model with categorical terms for route, and (ii) a linear mixed model with route as a random effect. For the simulations, set b0.mean <- 0, b0.sd <- .5, b1.mean <- .2, and b1.sd <- 0. Note that you will also have to change the models for fitting the data. Which method gives on average the lowest P-values for the significance of the slope? You will have to run the simulations several times for this.
+# 3. Compare three methods for analyzing a binary model with 10 routes and 20 stations 
+# per route, with routes having different slopes: the methods are (i) 10 separate 
+# linear models, (ii) a single linear model with categorical terms for route and 
+# route:slope interactions, and (iii) a linear mixed model with route as a random 
+# effect for both slope and intercept. For the simulations, set b0.mean <- 0, 
+# b0.sd <- 0, b1.mean <- 1, and b1.sd <- .5. What are the mean and variance in slopes 
+# calculated with each of the three methods? Are the patterns you get different from 
+# those in questions #1 for linear models?
 
-# 5. Bonus (optional) question: Write code and check the type I error rate for the glmm testing the hypothesis that there is no variance in the slopes among routes when there is variation in the intercept.
+
+# 4. Compare two methods for analyzing a binary model with 10 routes and 20 stations per 
+# route, with routes having the same slope but different intercepts: the methods are (i) 
+# a single linear model with categorical terms for route, and (ii) a linear mixed model 
+# with route as a random effect. For the simulations, set b0.mean <- 0, b0.sd <- .5, 
+# b1.mean <- .2, and b1.sd <- 0. Note that you will also have to change the models for 
+# fitting the data. Which method gives on average the lowest P-values for the 
+# significance of the slope? You will have to run the simulations several times for this.
+
+
+# 5. Bonus (optional) question: Write code and check the type I error rate for the glmm 
+# testing the hypothesis that there is no variance in the slopes among routes when 
+# there is variation in the intercept.

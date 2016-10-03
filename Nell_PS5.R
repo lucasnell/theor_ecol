@@ -86,6 +86,9 @@ g3 <- grouse_df %>%
     filter(PERIOD == 3)
 
 
+
+
+
 # -----------------
 # 1. Write out the two covariance matrices given by the model lmer(Y ~ X + (1 | ROUTE)) 
 # assuming that there are 3 routes and 3 stations per route. Do the same for the model 
