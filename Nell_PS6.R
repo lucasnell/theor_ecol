@@ -24,30 +24,6 @@ logit <- function(x){
 ncpus <- 3
 
 
-library(Rcpp)
-library(RcppArmadillo)
-
-n <- 1000
-cppFunction('NumericVector cppNorm(const int n) { NumericVector x = rnorm(n); return x; }')
-cppFunction('arma::vec armNorm(const int N) { 
-                      arma::vec x = arma::randn(N,1); 
-                      return x; 
-                      }', 
-                      depends = "RcppArmadillo")
-
-cppFunction('NumericVector cppBinom(const int n) { 
-            NumericVector x = rbinom(n, 1, 0.5); 
-            return x; 
-            }')
-
-system.time(replicate(10000, cppNorm(n)))
-system.time(replicate(10000, armNorm(n)))
-system.time(replicate(10000, rnorm(n)))
-
-
-system.time(replicate(100000, cppBinom(n)))
-system.time(replicate(100000, rbinom(n, 1, 0.5)))
-
 
 
 
@@ -119,32 +95,28 @@ g3 <- grouse_df %>%
 
 
 ####################################################################
-# NOTE: lmer() likes it better with nstations=20, so I changed it to this. But there are still sometimes error messages. Just ignore them.
+# NOTE: lmer() likes it better with nstations=20, so I changed it to this. But there are
+# still sometimes error messages. Just ignore them.
 
 # LMM with variation in the intercept and slope
-nroutes <- 10
-nstations <- 20
 
-b0.mean <- 1
-b0.sd <- 0
-b1.mean <- .2
-b1.sd <- .05
-e.sd <- .1
 
-x.mean <- 0
-x.sd <- 1
 
-# Simulation of linear model
-d <- data.frame(route=array(1:nroutes, dim=nroutes*nstations), X=0, Y=0)
-d <- d[order(d$route),]
-
-for(i in 1:nroutes) {
-	b0 <- b0.mean + rnorm(n=1, mean=0, sd=b0.sd)
-	b1 <- b1.mean + rnorm(n=1, mean=0, sd=b1.sd)
-	x <- rnorm(n=nstations, mean=x.mean, sd=x.sd)
-	d$X[d$route == i] <- x
-	d$Y[d$route == i] <- b0 + b1 * x + rnorm(n=10, mean=0, sd=e.sd)
+sim_fun <- function(i, nroutes = 10, nstations = 20, 
+                    b0.mean = 1, b0.sd = 0, b1.mean = 0.2, b1.sd = 0.05, 
+                    e.sd = 0.1, x.mean = 0, x.sd = 1) {
+    b0 <- b0.mean + rnorm(n=1, mean=0, sd=b0.sd)
+    b1 <- b1.mean + rnorm(n=1, mean=0, sd=b1.sd)
+    X <- rnorm(n=nstations, mean=x.mean, sd=x.sd)
+    Y <- b0 + b1 * X + rnorm(n=nstations, mean=0, sd=e.sd)
+    return(data_frame(X, Y, route = i))
 }
+
+set.seed(1)
+d <- lapply(seq(nroutes), sim_fun) %>% bind_rows
+
+
+
 
 # Plot the data along with separate linear fits for each route
 par(mfrow=c(2,1))
@@ -276,12 +248,14 @@ summary(z.glm)
 Anova(z.glm)
 
 b0.mean.sd <- c(mean(z.glm$coef[2:11]), sd(z.glm$coef[2:11]))
-b1.mean.sd <- c(mean(z.glm$coef[1] + c(0, z.glm$coef[12:20])), sd(c(0, z.lm$coef[12:20])))
+b1.mean.sd <- c(mean(z.glm$coef[1] + c(0, z.glm$coef[12:20])), 
+                sd(c(0, z.lm$coef[12:20])))
 b0.mean.sd
 b1.mean.sd
 
 # Estimate GLMM with route as a random effect for the slope and the intercept
-z.glmm <- glmer(Y ~ X + (1 + X | route), family = "binomial", data = d, glmerControl(calc.derivs=F))
+z.glmm <- glmer(Y ~ X + (1 + X | route), family = "binomial", data = d, 
+                glmerControl(calc.derivs=F))
 summary(z.glmm)
 
 plot(Y ~ X, data = d, main="Fits from GLMM")
@@ -294,7 +268,8 @@ for(i in 1:nroutes) {
 }
 
 # Test the significance of the slope random effect
-z0.glmm <- glmer(Y ~ X + (1 | route), family = "binomial", data = d, glmerControl(calc.derivs=F))
+z0.glmm <- glmer(Y ~ X + (1 | route), family = "binomial", data = d, 
+                 glmerControl(calc.derivs=F))
 P.value <- pchisq(2*(logLik(z.glmm) - logLik(z0.glmm)), df=2, lower.tail = F)
 P.value
 
