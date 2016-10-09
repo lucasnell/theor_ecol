@@ -44,13 +44,14 @@
 
 # Install required packages if they're not already installed, then load
 for (f in c('magrittr', 'dplyr', 'readr', 'tidyr', 'ggplot2', 'parallel', 'lme4', 
-            'car')) {
+            'car', 'GGally', 'boot')) {
     if (!f %in% rownames(installed.packages())) {
         install.packages(f, dependencies = TRUE)
     }
     library(f, character.only = TRUE)
 }; rm(f)
 
+RNGkind("L'Ecuyer-CMRG")
 
 
 # Inverse logit function
@@ -84,19 +85,20 @@ grouse_df <- read_csv(file = "grouse_data_7Sep16.csv",
                                     'Wild Turkey'))
     )
 
-# formerly rg3
-d <- grouse_df %>%
-    filter(PERIOD == 3, species == 'Ruffed Grouse')
+rg3 <- grouse_df %>%
+    filter(PERIOD == 3, species == 'Ruffed Grouse') %>% 
+    select(ROUTE, STATION, detected, WIND_SPEED, WINDSPEEDSQR) %>% 
+    rename(RUGR = detected)
 
-# formerly rg3_route
-w <- d %>% 
-    select(detected, ROUTE, STATION, WIND_SPEED, WINDSPEEDSQR) %>% 
+rg3_route <- rg3 %>% 
     group_by(ROUTE) %>% 
     summarize(
-        RUGR = sum(detected),
+        RUGR = sum(RUGR),
         STATIONS = n(),
         WIND_SPEED = mean(WIND_SPEED),
         WINDSPEEDSQR = mean(WINDSPEEDSQR))
+
+
 
 
 
@@ -144,51 +146,43 @@ w <- d %>%
 
 
 
-##################################################################################
-# ML estimation of the beta-binomial distribution
-##################################################################################
+# ========================================================================================
+# ========================================================================================
 
+#       ML estimation of the beta-binomial distribution
 
-# Simulate data w with a beta-binomial at the route level (from PS4)
-simulate.w.betabinomial <- function (w, b0, b1, theta) {
+# ========================================================================================
+# ========================================================================================
 
-	w.sim.Y <- array(-1, dim=dim(w)[1])
-	counter <- 1
-	for(i in levels(w$ROUTE)){
-		n <- w$STATIONS[i == w$ROUTE]
-		p <- inv_logit(b0 + b1*(w$WINDSPEEDSQR[counter]))
-		probRoute <- rbeta(n=1, shape1=p * theta, shape2=(1-p) * theta)
-		w.sim.Y[counter] <- rbinom(n=1, size=n, prob=probRoute)
-		counter <- counter + 1
-	}
-	return(w.sim.Y)
+# --------------------------
+# --------------------------
+#   Functions
+# --------------------------
+# --------------------------
+
+# ----------
+# Simulation function
+# ----------
+
+# Simulate data rg3_route with a beta-binomial at the route level
+beta_b_sim <- function(size, X, b0, b1, theta) {
+    # Inner function to do a single route's simulation
+    route_sim <- function(n, x, b0, b1, theta) {
+        p <- inv_logit(b0 + b1 * x)
+        prob_route <- rbeta(n = 1, shape1 = (p * theta), shape2 = {(1 - p) * theta})
+        rbinom(n = 1, size = n, prob = prob_route)
+    }
+    # Using `mapply` to iterate through the two input vectors
+    mapply(route_sim, size, X, 
+           MoreArgs = list(b0 = b0, b1 = b1, theta = theta), 
+           USE.NAMES = FALSE, SIMPLIFY = TRUE)
 }
 
-# Graph Beta-binomial simulations
-par(mfrow=c(3,1))
-
-# Beta-binomial distribution
-p <- 0.2
-theta <- 5
-shape1 <- p * theta
-shape2 <- (1-p) * theta
-sim.bb <- rbeta(n=1000, shape1=shape1, shape2=shape2)
-hist(sim.bb, main='Simulation of beta distribution', xlab="Route probability", freq = F)
-
-# Simulated data
-b0 <- logit(p)
-b1 <- 0
-w.sim <- w
-w.sim$RUGR <- simulate.w.betabinomial(w = w, b0 = b0, b1 = b1, theta = theta)
-
-hist(w.sim$RUGR/w.sim$STATIONS, main=paste('Beta-binom: mean = ', .001*round(1000*mean(w.sim$RUGR/w.sim$STATIONS)),'   sd=',.001*round(1000*sd(w.sim$RUGR/w.sim$STATIONS)), sep=''), xlab="RUGR/STATION")
-
-# Real data
-hist(w$RUGR/w$STATIONS, main=paste('Real data: mean = ', .001*round(1000*mean(w$RUGR/w$STATIONS)),'   sd=',.001*round(1000*sd(w$RUGR/w$STATIONS)), sep=''), xlab="RUGR/STATION")
 
 
-##################################################################################
+# ----------
 # Probability distribution and likelihood functions
+# ----------
 
 # Probability distribution function for a betabinomial distribution from the 
 # library "emdbook"
@@ -196,9 +190,9 @@ dbetabinom <- function(y, prob, size, theta, log = FALSE) {
 	v <- lfactorial(size) - lfactorial(y) - lfactorial(size - y) - 
 	    lbeta(theta * (1 - prob), theta * prob) + 
 	    lbeta(size - y + theta * (1 - prob), y + theta * prob)
-	if (sum((y%%1) != 0) != 0) {
+	if (any(y %% 1 != 0)) {
 		warning("non-integer x detected; returning zero probability")
-		v[n] <- -Inf
+		v[which(y %% 1 != 0)] <- -Inf
 	}
 	if (log == T) {
 		return(v)
@@ -222,7 +216,9 @@ dbetabinom_LLF <- function(parameters, Y, size, X) {
 	return(LL)
 }
 
-# Log-likelihood function for the betabinomial given data Y (vector of successes), Size (vector of number of trials), and independent variable X (WINDSPEEDSQR) with b1 = 0 in terms of parameters prob and theta
+# Log-likelihood function for the betabinomial given data Y (vector of successes), 
+# Size (vector of number of trials), and independent variable X (WINDSPEEDSQR) with 
+# b1 = 0 in terms of parameters prob and theta
 dbetabinom_LLF0 <- function(parameters, Y, size, X) {
 	theta <- parameters['theta']
 	b0 <- parameters['b0']
@@ -233,109 +229,223 @@ dbetabinom_LLF0 <- function(parameters, Y, size, X) {
 	return(LL)
 }
 
-##################################################################################
-# Fit to real data
 
-z <- optim(fn = dbetabinom_LLF, par = c(theta = 1, b0 = 0, b1 = 0.1), 
-           Y = w$RUGR, size = w$STATIONS, 
-           X = w$WINDSPEEDSQR, method = "BFGS")
-z$par
+# ----------
+# Simulate and fit many times
+# ----------
+
+# It is assumed that the optim_fn takes options Y, size, and X, and a vector
+# to be optimized over
+sim_bb_fit <- function(nsims, optim_fn, optim_par, sim_par, size, X, seed = NULL, 
+                       method = "BFGS") {
+    sim_b0 <- as.numeric(sim_par['b0'])
+    sim_b1 <- as.numeric(sim_par['b1'])
+    sim_theta <- as.numeric(sim_par['theta'])
+    # Inner function to get parameters b0, b1, and theta once
+    # This inherits all arguments from parent environment
+    # Argument i is only present so it can be used with lapply
+    one_sim <- function(i) {
+        sim_y <- beta_b_sim(size, X, sim_b0, sim_b1, sim_theta)
+        sim_fit <- suppressWarnings(
+            optim(fn = optim_fn, par = optim_par, 
+                  Y = sim_y, size = size, X = X, method = method))
+        sim_mat <- matrix(sim_fit$par, nrow = 1)
+        colnames(sim_mat) <- names(sim_fit$par)
+        return(as_data_frame(sim_mat))
+    }
+    if (!is.null(seed)) set.seed(seed)
+    sim_list <- lapply(seq(nsims), one_sim)
+    sim_df <- bind_rows(sim_list)
+    return(sim_df)
+}
+
+
+
+
+
+
+# --------------------------
+# --------------------------
+# Fit to real data
+# --------------------------
+# --------------------------
+
+rg3_route_fit <- optim(fn = dbetabinom_LLF, par = c(theta = 1, b0 = 0, b1 = 0.1), 
+                       Y = rg3_route$RUGR, size = rg3_route$STATIONS, 
+                       X = rg3_route$WINDSPEEDSQR, method = "BFGS")
 
 # Distribution of the estimators of b0, b1, and theta
 
-b0 <- -1.136343
-b1 <- -0.300938
-theta <- 5.684785
+b0 <- rg3_route_fit$par['b0'] %>% as.numeric
+b1 <- rg3_route_fit$par['b1'] %>% as.numeric
+theta <- rg3_route_fit$par['theta'] %>% as.numeric
 
-w.sim <- w
 
-nsims <- 1000
-output <- data.frame(b0.est=array(0,dim=nsims), b1.est=0, theta.est.glm=0)
-for(i in 1:nsims){
-	w.sim$RUGR <- simulate.w.betabinomial(w = w, b0 = b0, b1 = b1, theta = theta)
-	z.sim <- optim(fn = dbetabinom_LLF, par = c(theta = 1, b0 = 0, b1 = 0.1), Y = w.sim$RUGR, size = w.sim$STATIONS, X = w.sim$WINDSPEEDSQR, method = "BFGS")
-	
-	output$b0.est[i] <- z.sim$par['b0']
-	output$b1.est[i] <- z.sim$par['b1']
-	output$theta.est[i] <- z.sim$par['theta']
-}
+sim_bb <- sim_bb_fit(1000, dbetabinom_LLF, c(theta = 1, b0 = 0, b1 = 0.1), 
+                     c(theta = theta, b0 = b0, b1 = b1), rg3_route$STATIONS, 
+                     rg3_route$WINDSPEEDSQR, seed = 1)
 
-par(mfrow = c(3,1))
 
-hist(output$b0.est, main = paste('true b0 =', .001*round(1000*b0), ', mean b0.est =', .001*round(1000*mean(output$b0.est))), xlab = "ML estimates of b0", freq=F, breaks=100)
-lines(.01*(-1000:1000), dnorm(.01*(-1000:1000), mean=mean(output$b0.est), sd=sd(output$b0.est)), col="red")
+sim_bb %>% 
+    gather(parameter, value, everything(), factor_key = TRUE) %>% 
+    ggplot(aes(value, fill = parameter)) +
+    theme_bw() +
+    geom_histogram(bins = 50) +
+    geom_vline(
+        data = data_frame(x = c(theta, b0, b1), 
+                          parameter = factor(c('theta', 'b0', 'b1'))),
+        aes(xintercept = x),
+        linetype = 3) +
+    facet_grid(~ parameter, scales = 'free') +
+    theme(legend.position = 'none')
 
-hist(output$b1.est, main = paste('true b1 =', .001*round(1000*b1), ', mean b1.est =', .001*round(1000*mean(output$b1.est))), xlab = "ML estimates of b1", freq=F, breaks=100)
-lines(.01*(-1000:1000), dnorm(.01*(-1000:1000), mean=mean(output$b1.est), sd=sd(output$b1.est)), col="red")
-
-hist(output$theta.est, main = paste('true theta =', .001*round(1000*theta), ', mean theta.est =', .001*round(1000*mean(output$theta.est))), xlab = "ML estimates of theta", freq=F, breaks=100)
-lines(.01*(-1000:1000), dnorm(.01*(-1000:1000), mean=mean(output$theta), sd=sd(output$theta)), col="red")
-
+# ----------
 # 1. Is the ML estimator of b0, b1, or theta biased?
+# ----------
 
-# correlation among parameters
-par(mfrow = c(3,1))
+# They do not appear biased from my plots, although theta does not appear to have
+# a normal distribution. Presumably, this is because it cannot be < 0.
 
-plot(output$b1.est ~ output$b0.est, main = 'b1 vs. b0')
-plot(output$theta.est ~ output$b0.est, main = 'theta vs. b0')
-plot(output$theta.est ~ output$b1.est, main = 'theta vs. b1')
 
+
+
+
+
+
+# ----------
 # 2. Explain the pattern of correlation among paramaters. Do these make sense to you?
+# ----------
+
+sim_bb %>% 
+    ggpairs() +
+    theme_bw()
+
+
+# This makes sense to me that b0 and b1 would be negatively correlated.
+# When the intercept is lower, it makes sense that a model with a higher slope would 
+# better account for points at higher X and Y values.
+
+
+
+
+
+
+
+
+
 
 # Bootstrap testing H0: b1 = 0 from the distribution of the estimator of b1
 
-par(mfrow = c(2,1))
+ggplot(sim_bb, aes(b1)) +
+    geom_histogram(bins = 50, fill = 'dodgerblue') +
+    geom_vline(linetype = 3, xintercept = 0) +
+    theme_bw() +
+    geom_text(data = data_frame(
+        x = -0.8, y = 55, 
+        label = paste('P-value =', 2 * round(mean(sim_bb$b1 > 0), 3))
+    ), 
+    aes(x = x, y = y, label = label), hjust = 0, vjust = 1, size = 6) +
+    xlab('ML estimates of' ~ beta[1])
 
-hist(output$b1.est, main = paste('Fraction > 0 = ', .0001*round(10000*mean(output$b1.est > 0)), ', P-value = ', 2 * .0001*round(10000*mean(output$b1.est > 0))), xlab = "ML estimates of b1", freq=F, breaks=100)
-lines(c(0, 0), c(0,10), col='red')
 
 # Bootstrap testing H0: b1 = 0 under the null hypothesis
 
-z0 <- optim(fn = dbetabinom_LLF0, par = c(theta = 1, b0 = 0), Y = w$RUGR, size = w$STATIONS, X = w$WINDSPEEDSQR, method = "BFGS")
-z0$par
+rg3_route_fit0 <- optim(fn = dbetabinom_LLF0, par = c(theta = 1, b0 = 0), 
+                       Y = rg3_route$RUGR, size = rg3_route$STATIONS, 
+                       X = rg3_route$WINDSPEEDSQR, method = "BFGS")
 
-b0 <- -1.541177
-b1true <- b1
-b1 <- 0
-theta <- 5.190277
+b0_0 <- rg3_route_fit0$par['b0'] %>% as.numeric
+b1_true <- b1
+theta_0 <- rg3_route_fit0$par['theta'] %>% as.numeric
 
-w.sim <- w
 
-nsims <- 1000
-output <- data.frame(b0.est=array(0,dim=nsims), b1.est=0, theta.est.glm=0)
-for(i in 1:nsims){
-	w.sim$RUGR <- simulate.w.betabinomial(w = w, b0 = b0, b1 = b1, theta = theta)
-	z.sim <- optim(fn = dbetabinom_LLF, par = c(theta = 1, b0 = 0, b1 = 0.1), Y = w.sim$RUGR, size = w.sim$STATIONS, X = w.sim$WINDSPEEDSQR, method = "BFGS")
-	
-	output$b0.est[i] <- z.sim$par['b0']
-	output$b1.est[i] <- z.sim$par['b1']
-	output$theta.est[i] <- z.sim$par['theta']
-}
+sim_bb0 <- sim_bb_fit(1000, dbetabinom_LLF, c(theta = 1, b0 = 0, b1 = 0.1), 
+                     c(theta = theta_0, b0 = b0_0, b1 = 0), rg3_route$STATIONS, 
+                     rg3_route$WINDSPEEDSQR, seed = 2)
 
-hist(output$b1.est, main = paste('Fraction < b1true = ', .0001*round(10000*mean(output$b1.est < b1true)), ', P-value = ', 2 * .0001*round(10000*mean(output$b1.est < b1true))), xlab = "ML estimates of b1 under H0", freq=F, breaks=100)
-lines(c(b1true, b1true), c(0,10), col='red')
 
-# 3. Compare the two bootstrap methods for determining whether b1 differs from zero. Which method is correct?
+
+
+ggplot(sim_bb0, aes(b1)) +
+    geom_histogram(bins = 50, fill = 'dodgerblue') +
+    geom_vline(linetype = 3, xintercept = b1_true) +
+    theme_bw() +
+    geom_text(data = data_frame(
+        x = 0.5, y = 70, 
+        label = paste('P-value =', 2 * round(mean(sim_bb0$b1 < b1_true), 3))
+    ), 
+    aes(x = x, y = y, label = label), hjust = 1, vjust = 1, size = 6) +
+    xlab('ML estimates of' ~ beta[1] * ' under ' * H[0])
+
+
+
+# ----------
+# 3. Compare the two bootstrap methods for determining whether b1 differs from zero. 
+# Which method is correct?
+# ----------
+
+
+# For hypothesis testing, technically the second version is the correct one. The first
+# is more appropriate for presenting confidence intervals.
+
+
+
+
+
+
+
+
 
 # Likelihood ratio test (LRT)
-z <- optim(fn = dbetabinom_LLF, par = c(theta = 1, b0 = 0, b1 = 0.1), Y = w$RUGR, size = w$STATIONS, X = w$WINDSPEEDSQR, method = "BFGS")
-z$par
+z <- suppressWarnings(
+    optim(fn = dbetabinom_LLF, par = c(theta = 1, b0 = 0, b1 = 0.1), 
+          Y = rg3_route$RUGR, size = rg3_route$STATIONS, X = rg3_route$WINDSPEEDSQR, 
+          method = "BFGS"))
 
-z0 <- optim(fn = dbetabinom_LLF0, par = c(theta = 1, b0 = 0), Y = w$RUGR, size = w$STATIONS, X = w$WINDSPEEDSQR, method = "BFGS")
-z0$par
+z0 <- suppressWarnings(
+    optim(fn = dbetabinom_LLF0, par = c(theta = 1, b0 = 0), Y = rg3_route$RUGR, 
+          size = rg3_route$STATIONS, X = rg3_route$WINDSPEEDSQR, method = "BFGS"))
 
 logLik <- -z$value
 logLik0 <- -z0$value
 
 pchisq(2*(logLik - logLik0), df = 1, lower.tail = F)
 
-# 4. Compare the bootstrap tests of H0:b1 = 0 to the LRT. Which do you think gives the best test? What would you want to do to validate the LRT? (Bonus points if you go ahead and do this validation!)
+# ----------
+# 4. Compare the bootstrap tests of H0:b1 = 0 to the LRT. Which do you think gives the 
+# best test? What would you want to do to validate the LRT? (Bonus points if you go 
+# ahead and do this validation!)
+# ----------
 
-##################################################################################
+# The bootstrap test is the "gold standard", but LRT appears to agree quite well.
+# To validate, you could run simulations with b1 = 0 and look at type I for LRT.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# ========================================================================================
+# ========================================================================================
+
 # Comparison among all methods
-##################################################################################
+# Route level data
 
-# 5. Perform all of the analyses that we have done so far to test whether WINDSPEEDSQR has an effect on detecting RUGR in PERIOD 3. What are the pros and cons for each analysis? I have given some of the code below that you could use for ML estimation of the beta-binomial and bootstrapping the glmms.
+# ========================================================================================
+# ========================================================================================
+
+# 5. Perform all of the analyses that we have done so far to test whether WINDSPEEDSQR 
+# has an effect on detecting RUGR in PERIOD 3. What are the pros and cons for each 
+# analysis? I have given some of the code below that you could use for ML estimation of 
+# the beta-binomial and bootstrapping the glmms.
 
 # ROUTE-level data
 
@@ -359,102 +469,377 @@ pchisq(2*(logLik - logLik0), df = 1, lower.tail = F)
 ##################################################################################
 # needed code
 
-library(lme4)
-library(lmerTest)
-require("boot")
 
-# This is the inverse logit function
-inv_logit <- function(x){
-	1/(1 + exp(-x))
-}
 
-# Simulate data w with a beta-binomial at the route level (from PS4)
-simulate.w.betabinomial <- function (w, b0, b1, theta) {
-
-	w.sim.Y <- array(-1, dim=dim(w)[1])
-	counter <- 1
-	for(i in levels(w$ROUTE)){
-		n <- w$STATIONS[i == w$ROUTE]
-		p <- inv_logit(b0 + b1*(w$WINDSPEEDSQR[counter]))
-		probRoute <- rbeta(n=1, shape1=p * theta, shape2=(1-p) * theta)
-		w.sim.Y[counter] <- rbinom(n=1, size=n, prob=probRoute)
-		counter <- counter + 1
-	}
-	return(w.sim.Y)
-}
-
-# Probability distribution function for a betabinomial distribution from the library "emdbook"
-dbetabinom <- function(y, prob, size, theta, log = FALSE) {
-	v <- lfactorial(size) - lfactorial(y) - lfactorial(size - y) - lbeta(theta * (1 - prob), theta * prob) + lbeta(size - y + theta * (1 - prob), y + theta * prob)
-	if (sum((y%%1) != 0) != 0) {
-		warning("non-integer x detected; returning zero probability")
-		v[n] <- -Inf
-	}
-	if (log == T) {
-		return(v)
-	}else {
-		return(exp(v))
-	}
-}
-
-# Log-likelihood function for the betabinomial given data Y (vector of successes), Size (vector of number of trials), and independent variable X (WINDSPEEDSQR) in terms of parameters prob and theta
-dbetabinom_LLF <- function(parameters, Y, size, X) {
-	theta <- parameters['theta']
-	b0 <- parameters['b0']
-	b1 <- parameters['b1']
-
-	prob <- inv_logit(b0 + b1 * X)	
-	LL <- -sum(dbetabinom(y = Y, size = size, prob = prob, theta = theta, log = TRUE))
-
-	return(LL)
-}
-
-# Log-likelihood function for the betabinomial given data Y (vector of successes), Size (vector of number of trials), and independent variable X (WINDSPEEDSQR) with b1 = 0 in terms of parameters prob and theta
-dbetabinom_LLF0 <- function(parameters, Y, size, X) {
-	theta <- parameters['theta']
-	b0 <- parameters['b0']
-	
-	prob <- inv_logit(b0)
-	LL <- -sum(dbetabinom(y = Y, size = size, prob = prob, theta = theta, log = TRUE))
-
-	return(LL)
-}
 
 # Simulate data w with a logitnormal-binomial at the route level
-simulate.w.logitnormalbinomial <- function (w, b0, b1, sd) {
-
-	w.sim.Y <- array(-1, dim=dim(w)[1])
-	counter <- 1
-	for(i in levels(w$ROUTE)){
-		nn <- w$STATIONS[i == w$ROUTE]
-		e <- rnorm(n = 1, mean = 0, sd = sd)
-		probRoute <- inv_logit(b0 + b1*(w$WINDSPEEDSQR[counter]) + e)
-		w.sim.Y[counter] <- rbinom(n=1, size=nn, prob=probRoute)
-		counter <- counter + 1
-	}
-	return(w.sim.Y)
+lnb_sim <- function (size, X, b0, b1, sd) {
+    # Inner function to do a single route's simulation
+    route_sim <- function(n, x, b0, b1, sd) {
+        E <- rnorm(n = 1, mean = 0, sd = sd)
+        prob_route <- inv_logit(b0 + b1*x + E)
+        rbinom(n = 1, size = n, prob = prob_route)
+    }
+    # Using `mapply` to iterate through the two input vectors
+    mapply(route_sim, size, X, 
+           MoreArgs = list(b0 = b0, b1 = b1, sd = sd), 
+           USE.NAMES = FALSE, SIMPLIFY = TRUE)
 }
 
-# Simulate data d with a logitnormal-binomial at the station level (from PS4)
-simulate.d.logitnormalbinomial <- function (d, b0, b1, sd) {
-
-	d.sim.Y <- array(-1, dim=dim(d)[1])
-	for(i in levels(d$ROUTE)){
-		dd <- d[d$ROUTE == i,]
-		nn <- dim(dd)[1]
-		probRoute <- rnorm(n=1, mean=0, sd=sd)
-		probObs <- inv_logit(b0 + b1*dd$WINDSPEEDSQR + probRoute)
-		d.sim.Y[d$ROUTE == i] <- rbinom(n=nn, size=1, prob=probObs)
-	}
-	return(d.sim.Y)
+# Bootstrap b1 ML estimate
+boot_test_b1 <- function(optim_fn, optim_fn_0, Y, size, X, nsims = 1000, seed = NULL,
+                         optim_par = c(theta = 1, b0 = 0, b1 = 0.1), 
+                         optim_par_0 = c(theta = 1, b0 = 0)) {
+    fit_0 <- optim(fn = optim_fn_0, par = optim_par_0, Y = Y, size = size,
+                   X = X, method = "BFGS")
+    b0_0 <- as.numeric(fit_0$par['b0'])
+    theta_0 <- as.numeric(fit_0$par['theta'])
+    sim_0 <- sim_bb_fit(nsims, optim_fn, optim_par, 
+                        c(theta = theta_0, b0 = b0_0, b1 = 0), size, X, seed = seed)
+    return(sim_0$b1)
 }
 
-##################################################################################
-# ROUTE-level data
 
-summary(w)
 
-##################################################################################
-# STATION-level data
 
-summary(d)
+# Extract model info for route-level models
+model_ext_route <- function(m, models){
+    mmat <- matrix(c(
+        m,
+        ifelse(m == 'betab', as.numeric(models[[m]][[1]]$par['b1']), 
+               models[[m]]$coef[2]),
+        ifelse(m == 'betab', 
+               pchisq(2 * (as.numeric(-models[[m]][[1]]$value) - 
+                               as.numeric(-models[[m]][[2]]$value)), 
+                      df = 1, lower.tail = FALSE), 
+               summary(models[[m]])$coef[2,4])),
+        nrow = 1
+    )
+    colnames(mmat) <- c('method', 'b1', 'P')
+    mdf <- as_data_frame(mmat)
+    mdf$b1 <- as.numeric(mdf$b1)
+    mdf$P <- as.numeric(mdf$P)
+    return(mdf)
+}
+
+
+# *Notes:* It's assumed that the sim_fun takes size_vec, then x_vec, then other args
+comp_methods_route <- function(size_vec, x_vec, sim_fun, model_ext_fun, ...) {
+    
+    sim_y <- sim_fun(size_vec, x_vec, ...)
+    
+    models <- list(
+        lm = lm(sim_y ~ x_vec),
+        glm = glm(cbind(sim_y, size_vec - sim_y) ~ x_vec, family = "binomial"),
+        qglm = glm(cbind(sim_y, size_vec - sim_y) ~ x_vec, family = "quasibinomial"),
+        betab = list(
+            suppressWarnings(
+                optim(fn = dbetabinom_LLF, par = c(theta = 1, b0 = 0, b1 = 0.1),
+                      Y = sim_y, size = size_vec, X = x_vec, method = 'BFGS')),
+            suppressWarnings(
+                optim(fn = dbetabinom_LLF0, par = c(theta = 1, b0 = 0), Y = sim_y,
+                      size = size_vec, X = x_vec, method = "BFGS"))
+            )
+    )
+
+    lapply(names(models), model_ext_fun, models = models)
+}
+
+
+# Comparing Type I error rates and power (takes ~1.25 min)
+b1_range <- seq(0, 0.8, 0.2)
+nsims <- 1000
+
+set.seed(3)
+rej_route <- mclapply(
+    1:nsims,
+    function(i) {
+        lapply(
+            b1_range,
+            function(b1_i){
+                comp_methods_route(rg3_route$STATIONS, rg3_route$WINDSPEEDSQR, 
+                                   beta_b_sim, model_ext_route, b0 = b0_0, b1 = b1_i, 
+                                   theta = theta_0)
+            }) %>% 
+            do.call(what = bind_rows, args = .) %>% 
+            mutate(b1_true = rep(b1_range, each = 4))
+    }, 
+    mc.cores = ncpus) %>%
+    bind_rows
+
+
+
+
+rej_route %>% 
+    group_by(method, b1_true) %>% 
+    summarize(rejected = mean(P < 0.05)) %>% 
+    ggplot(aes(b1_true, rejected, color = factor(method))) +
+    theme_bw() +
+    geom_line() +
+    geom_hline(yintercept = 0.05, linetype = 3)
+
+
+
+# Table of Type I error
+rej_route %>% 
+    filter(b1_true == 0) %>% 
+    group_by(method) %>% 
+    summarize(rejected = mean(P < 0.05))
+
+# P value for betabinomial ML bootstrap
+set.seed(4)
+mean(boot_test_b1(dbetabinom_LLF, dbetabinom_LLF0, rg3_route$RUGR, rg3_route$STATIONS,
+             rg3_route$WINDSPEEDSQR, seed = 3, nsims = 1000) < b1_true)
+
+
+# I don't see any major biases (obv lm isn't interpretable here)
+rej_route %>% 
+    mutate_each(funs(as.factor), method, b1_true) %>% 
+    ggplot(aes(b1)) + 
+    geom_histogram(bins = 50, fill = 'dodgerblue') +
+    theme_bw() +
+    geom_vline(aes(xintercept = as.numeric(paste(b1_true))), linetype = 2) +
+    facet_grid(b1_true ~ method, scales = 'free')
+
+
+
+
+
+
+# Now checking the same thing if the distribution is from a logitnormal-binomial
+# distribution
+set.seed(5)
+rej_route_ln <- mclapply(
+    1:nsims, 
+    function(i) {
+        lapply(
+            b1_range, 
+            function(b1_i){
+                comp_methods_route(rg3_route$STATIONS, rg3_route$WINDSPEEDSQR, 
+                                   lnb_sim, model_ext_route, b0 = b0_0, b1 = b1_i, 
+                                   sd = sd(rg3_route$RUGR))
+            }) %>% 
+            do.call(what = bind_rows, args = .) %>% 
+            mutate(b1_true = rep(b1_range, each = 4))
+    }, 
+    mc.cores = ncpus) %>% 
+    bind_rows
+
+
+rej_route_ln %>% 
+    group_by(method, b1_true) %>% 
+    summarize(rejected = mean(P < 0.05)) %>% 
+    ggplot(aes(b1_true, rejected, color = factor(method))) +
+    theme_bw() +
+    geom_line() +
+    geom_hline(yintercept = 0.05, linetype = 3)
+
+
+
+# Table of Type I error
+rej_route_ln %>% 
+    filter(b1_true == 0) %>% 
+    group_by(method) %>% 
+    summarize(rejected = mean(P < 0.05))
+
+
+
+# With higher b1_true, there appears to be more bias
+rej_route_ln %>% 
+    mutate_each(funs(as.factor), method, b1_true) %>% 
+    ggplot(aes(b1)) + 
+    geom_histogram(bins = 50, fill = 'dodgerblue') +
+    theme_bw() +
+    geom_vline(aes(xintercept = as.numeric(paste(b1_true))), linetype = 2) +
+    facet_grid(b1_true ~ method, scales = 'free')
+
+
+
+# ----------
+# Assuming the data follows a betabinomial distribution best, my rankings are as follows:
+# lm (most powerful test with good type I error control)
+# betabinomial ML with bootstrapped test (if needing predictions, I'd use this one)
+# betabinomial ML with LRT
+# quasibinomial glm
+# binomial glm (would not use at all bc of terrible type I error control)
+
+# Assuming the data follows a logitnormal-binomial distribution best, my rankings are 
+# as follows:
+# lm (most powerful test with good type I error control and no bias)
+# I wouldn't use any of these:
+# betabinomial ML with bootstrapped test (biased)
+# betabinomial ML with LRT (biased)
+# quasibinomial glm (biased)
+# binomial glm (terrible type I error control)
+# ----------
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# ========================================================================================
+# ========================================================================================
+
+# Comparison among all methods
+# Station level data
+
+# ========================================================================================
+# ========================================================================================
+
+
+# Simulate data w with a logitnormal-binomial at the station level
+lnorm_b_sim <- function(groups, X, b0, b1, sd) {
+    # Inner function to do a single group's simulation
+    group_sim <- function(X_i) {
+        n <- length(X_i)
+        E <- rnorm(n = 1, mean = 0, sd = sd)
+        prob_obs <- inv_logit(b0 + (b1 * X_i) + E)
+        rbinom(n = n, size = 1, prob = prob_obs)
+    }
+
+    split_list <- split(X, groups)
+    sim_list <- lapply(split_list, group_sim)
+    return(as.numeric(c(sim_list, recursive = TRUE)))
+}
+
+
+
+
+# Extract model info for route-level models
+model_ext_station <- function(m, models){
+    if (m == 'lmm') {
+        P <- summary(models[[m]])$coef[2,5]
+    } else if (m == 'glmm_boot') {
+        boot_obj = bootMer(models[[m]], 
+                           function(m){summary(m)$coef[2,4]}, 
+                           nsim = 100, type = 'parametric')
+        P <- 2 * min(mean(boot_obj$t < 0), mean(boot_obj$t > 0))
+    } else {
+        P <- summary(models[[m]])$coef[2,4]
+    }
+    b1 <- ifelse(
+        grepl('mm', m), 
+        summary(models[[m]])$coef[2,1], 
+        models[[m]]$coef[2]
+        )
+    
+    mmat <- matrix(c(m, b1, P), nrow = 1)
+    colnames(mmat) <- c('method', 'b1', 'P')
+    mdf <- as_data_frame(mmat)
+    mdf$b1 <- as.numeric(mdf$b1)
+    mdf$P <- as.numeric(mdf$P)
+    return(mdf)
+}
+
+
+
+
+
+# *Notes:* It's assumed that the sim_fun takes groups_vec, then x_vec, then other args
+# It's also assumed that groups_vec is the random effect in mixed models
+comp_methods_station <- function(groups_vec, x_vec, sim_fun, model_ext_fun, ...) {
+    
+    sim_y <- sim_fun(groups_vec, x_vec, ...)
+    
+    models <- list(
+        lm = lm(sim_y ~ x_vec),
+        glm = glm(sim_y ~ x_vec, family = "binomial"),
+        lmm = lmerTest::lmer(sim_y ~ x_vec + (1 | groups_vec), 
+                             control = lmerControl(calc.derivs = FALSE)),
+        glmm = glmer(sim_y ~ x_vec + (1 | groups_vec), family = "binomial", nAGQ = 0,
+                     control = glmerControl(calc.derivs = FALSE))
+        )
+    models[['glmm_boot']] <- models[['glmm']]
+    
+    lapply(names(models), model_ext_fun, models = models)
+}
+
+
+
+# system.time(
+# comp_methods_station(rg3$ROUTE, rg3$WINDSPEEDSQR, lnorm_b_sim,
+#                       model_ext_station, b0 = mean(rg3_route$RUGR/rg3_route$STATIONS),
+#                       b1 = 0,
+#                       sd = sd(rg3_route$RUGR))
+# )
+# # Time taken per iteration
+# #    user  system elapsed 
+# #   4.875   0.108   5.030
+
+# Comparing Type I error rates and power (takes 3.715058 hours)
+b1_range <- seq(0, 0.5, 0.1)
+nsims <- 1000
+
+
+# set.seed(11)
+# rej_station <- mclapply(
+#     1:nsims,
+#     function(i) {
+#         lapply(
+#             b1_range,
+#             function(b1_i){
+#                 comp_methods_station(rg3$ROUTE, rg3$WINDSPEEDSQR, lnorm_b_sim,
+#                                      model_ext_station, 
+#                                      b0 = mean(rg3_route$RUGR/rg3_route$STATIONS),
+#                                      b1 = b1_i,
+#                                      sd = sd(rg3_route$RUGR))
+#             }) %>% 
+#             do.call(what = bind_rows, args = .) %>% 
+#             mutate(b1_true = rep(b1_range, each = 5))
+#     }, 
+#     mc.cores = ncpus) %>%
+#     bind_rows
+# 
+# save(rej_station, file = 'station_sims.RData', compression_level = 9)
+load('station_sims.RData')
+
+
+rej_station %>% 
+    group_by(method, b1_true) %>% 
+    summarize(rejected = mean(P < 0.05)) %>% 
+    ggplot(aes(b1_true, rejected, color = factor(method), linetype = factor(method))) +
+    theme_bw() +
+    geom_line() +
+    geom_hline(yintercept = 0.05, linetype = 3)
+
+
+
+# Table of Type I error
+rej_station %>% 
+    filter(b1_true == 0) %>% 
+    group_by(method) %>% 
+    summarize(rejected = mean(P < 0.05))
+
+
+
+# 
+# # Moving this file to Box folder...
+# system(
+#     paste("cd", getwd(),
+#           "&& cp Nell_PS7.R",
+#           "~/'Box Sync/ZooEnt_540_2016/Homework Folders/L_Nell/'")
+# )
