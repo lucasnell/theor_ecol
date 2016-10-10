@@ -100,6 +100,10 @@ rg3_route <- rg3 %>%
 
 
 
+# Load simulation objects to save time
+# All code need to make these objects is commented out below
+load('route_sims.RData')
+load('station_sims.RData')
 
 
 ##################################################################################
@@ -281,9 +285,10 @@ b1 <- rg3_route_fit$par['b1'] %>% as.numeric
 theta <- rg3_route_fit$par['theta'] %>% as.numeric
 
 
-sim_bb <- sim_bb_fit(1000, dbetabinom_LLF, c(theta = 1, b0 = 0, b1 = 0.1), 
-                     c(theta = theta, b0 = b0, b1 = b1), rg3_route$STATIONS, 
-                     rg3_route$WINDSPEEDSQR, seed = 1)
+# Already loaded from route_sims.RData
+# sim_bb <- sim_bb_fit(1000, dbetabinom_LLF, c(theta = 1, b0 = 0, b1 = 0.1), 
+#                      c(theta = theta, b0 = b0, b1 = b1), rg3_route$STATIONS, 
+#                      rg3_route$WINDSPEEDSQR, seed = 1)
 
 
 sim_bb %>% 
@@ -359,9 +364,10 @@ b1_true <- b1
 theta_0 <- rg3_route_fit0$par['theta'] %>% as.numeric
 
 
-sim_bb0 <- sim_bb_fit(1000, dbetabinom_LLF, c(theta = 1, b0 = 0, b1 = 0.1), 
-                     c(theta = theta_0, b0 = b0_0, b1 = 0), rg3_route$STATIONS, 
-                     rg3_route$WINDSPEEDSQR, seed = 2)
+# Already loaded from route_sims.RData
+# sim_bb0 <- sim_bb_fit(1000, dbetabinom_LLF, c(theta = 1, b0 = 0, b1 = 0.1), 
+#                      c(theta = theta_0, b0 = b0_0, b1 = 0), rg3_route$STATIONS, 
+#                      rg3_route$WINDSPEEDSQR, seed = 2)
 
 
 
@@ -550,22 +556,23 @@ comp_methods_route <- function(size_vec, x_vec, sim_fun, model_ext_fun, ...) {
 b1_range <- seq(0, 0.8, 0.2)
 nsims <- 1000
 
-set.seed(3)
-rej_route <- mclapply(
-    1:nsims,
-    function(i) {
-        lapply(
-            b1_range,
-            function(b1_i){
-                comp_methods_route(rg3_route$STATIONS, rg3_route$WINDSPEEDSQR, 
-                                   beta_b_sim, model_ext_route, b0 = b0_0, b1 = b1_i, 
-                                   theta = theta_0)
-            }) %>% 
-            do.call(what = bind_rows, args = .) %>% 
-            mutate(b1_true = rep(b1_range, each = 4))
-    }, 
-    mc.cores = ncpus) %>%
-    bind_rows
+# Already loaded from route_sims.RData
+# set.seed(3)
+# rej_route <- mclapply(
+#     1:nsims,
+#     function(i) {
+#         lapply(
+#             b1_range,
+#             function(b1_i){
+#                 comp_methods_route(rg3_route$STATIONS, rg3_route$WINDSPEEDSQR, 
+#                                    beta_b_sim, model_ext_route, b0 = b0_0, b1 = b1_i, 
+#                                    theta = theta_0)
+#             }) %>% 
+#             do.call(what = bind_rows, args = .) %>% 
+#             mutate(b1_true = rep(b1_range, each = 4))
+#     }, 
+#     mc.cores = ncpus) %>%
+#     bind_rows
 
 
 
@@ -588,8 +595,8 @@ rej_route %>%
 
 # P value for betabinomial ML bootstrap
 set.seed(4)
-mean(boot_test_b1(dbetabinom_LLF, dbetabinom_LLF0, rg3_route$RUGR, rg3_route$STATIONS,
-             rg3_route$WINDSPEEDSQR, seed = 3, nsims = 1000) < b1_true)
+2 * mean(boot_test_b1(dbetabinom_LLF, dbetabinom_LLF0, rg3_route$RUGR, rg3_route$STATIONS,
+                      rg3_route$WINDSPEEDSQR, seed = 3, nsims = 1000) < b1_true)
 
 
 # I don't see any major biases (obv lm isn't interpretable here)
@@ -604,26 +611,25 @@ rej_route %>%
 
 
 
-
-
-# Now checking the same thing if the distribution is from a logitnormal-binomial
-# distribution
-set.seed(5)
-rej_route_ln <- mclapply(
-    1:nsims, 
-    function(i) {
-        lapply(
-            b1_range, 
-            function(b1_i){
-                comp_methods_route(rg3_route$STATIONS, rg3_route$WINDSPEEDSQR, 
-                                   lnb_sim, model_ext_route, b0 = b0_0, b1 = b1_i, 
-                                   sd = sd(rg3_route$RUGR))
-            }) %>% 
-            do.call(what = bind_rows, args = .) %>% 
-            mutate(b1_true = rep(b1_range, each = 4))
-    }, 
-    mc.cores = ncpus) %>% 
-    bind_rows
+# Already loaded from route_sims.RData
+# # Now checking the same thing if the distribution is from a logitnormal-binomial
+# # distribution
+# set.seed(5)
+# rej_route_ln <- mclapply(
+#     1:nsims, 
+#     function(i) {
+#         lapply(
+#             b1_range, 
+#             function(b1_i){
+#                 comp_methods_route(rg3_route$STATIONS, rg3_route$WINDSPEEDSQR, 
+#                                    lnb_sim, model_ext_route, b0 = b0_0, b1 = b1_i, 
+#                                    sd = sd(rg3_route$RUGR))
+#             }) %>% 
+#             do.call(what = bind_rows, args = .) %>% 
+#             mutate(b1_true = rep(b1_range, each = 4))
+#     }, 
+#     mc.cores = ncpus) %>% 
+#     bind_rows
 
 
 rej_route_ln %>% 
@@ -674,6 +680,8 @@ rej_route_ln %>%
 # ----------
 
 
+# save(sim_bb, sim_bb0, rej_route, rej_route_ln, file = 'route_sims.RData', 
+#      compression_level = 9)
 
 
 
@@ -726,7 +734,10 @@ lnorm_b_sim <- function(groups, X, b0, b1, sd) {
     return(as.numeric(c(sim_list, recursive = TRUE)))
 }
 
-
+z_trans <- function(x) {
+    z_x <- (x - mean(x)) / sd(x)
+    return(z_x)
+}
 
 
 # Extract model info for route-level models
@@ -735,8 +746,11 @@ model_ext_station <- function(m, models){
         P <- summary(models[[m]])$coef[2,5]
     } else if (m == 'glmm_boot') {
         boot_obj = bootMer(models[[m]], 
-                           function(m){summary(m)$coef[2,4]}, 
+                           function(m){summary(m)$coef[2,1]}, 
                            nsim = 100, type = 'parametric')
+        # "equal-tail bootstrap P value"
+        # (from "Bootstrap Hypothesis Testing" by James G. MacKinnon)
+        # http://qed.econ.queensu.ca/working_papers/papers/qed_wp_1127.pdf (p 4)
         P <- 2 * min(mean(boot_obj$t < 0), mean(boot_obj$t > 0))
     } else {
         P <- summary(models[[m]])$coef[2,4]
@@ -790,12 +804,13 @@ comp_methods_station <- function(groups_vec, x_vec, sim_fun, model_ext_fun, ...)
 # #    user  system elapsed 
 # #   4.875   0.108   5.030
 
-# Comparing Type I error rates and power (takes 3.715058 hours)
+# Comparing Type I error rates and power (takes 4.13408 hours)
 b1_range <- seq(0, 0.5, 0.1)
 nsims <- 1000
 
 
 # set.seed(11)
+# t0 = Sys.time()
 # rej_station <- mclapply(
 #     1:nsims,
 #     function(i) {
@@ -803,19 +818,20 @@ nsims <- 1000
 #             b1_range,
 #             function(b1_i){
 #                 comp_methods_station(rg3$ROUTE, rg3$WINDSPEEDSQR, lnorm_b_sim,
-#                                      model_ext_station, 
+#                                      model_ext_station,
 #                                      b0 = mean(rg3_route$RUGR/rg3_route$STATIONS),
 #                                      b1 = b1_i,
 #                                      sd = sd(rg3_route$RUGR))
-#             }) %>% 
-#             do.call(what = bind_rows, args = .) %>% 
+#             }) %>%
+#             do.call(what = bind_rows, args = .) %>%
 #             mutate(b1_true = rep(b1_range, each = 5))
-#     }, 
+#     },
 #     mc.cores = ncpus) %>%
 #     bind_rows
-# 
+# t1 = Sys.time()
+# t1 - t0
 # save(rej_station, file = 'station_sims.RData', compression_level = 9)
-load('station_sims.RData')
+
 
 
 rej_station %>% 
@@ -824,7 +840,8 @@ rej_station %>%
     ggplot(aes(b1_true, rejected, color = factor(method), linetype = factor(method))) +
     theme_bw() +
     geom_line() +
-    geom_hline(yintercept = 0.05, linetype = 3)
+    geom_hline(yintercept = 0.05, linetype = 3) +
+    scale_linetype_manual(values = c(1,1,1,2,1))
 
 
 
@@ -836,10 +853,139 @@ rej_station %>%
 
 
 
+# The b1 estimators for all of the generalized linear models are biased
+rej_station %>% 
+    mutate_each(funs(as.factor), method, b1_true) %>% 
+    ggplot(aes(b1)) + 
+    geom_histogram(bins = 50, fill = 'dodgerblue') +
+    theme_bw() +
+    geom_vline(aes(xintercept = as.numeric(paste(b1_true))), linetype = 2) +
+    facet_grid(b1_true ~ method, scales = 'free')
+
+
+
+
+# ----------
+# I'd order these as follows:
+# lmm with approximate t-tests (from lmerTest)
+# glmm with approximate t-tests (from lmerTest)
+# glmm with bootstrapped test
+
+# lm
+# binomial glm
+# ----------
+
+
+# I'm going to use a linear mixed model because we're not really concerned with 
+# making predictions (at least to my knowledge) and it's not biased
+
+final_mod <- lmerTest::lmer(RUGR ~ WINDSPEEDSQR + (1 | ROUTE), data = rg3)
+P <- summary(final_mod)$coef[2,5]
+# bt <- bootMer(final_mod, function(x){summary(x)$coef[2,1]}, nsim = 1000, seed = 99, 
+#               type = 'parametric', parallel = 'multicore', ncpus = ncpus)
+P_bt <- 0.002  # 2 * min(mean(bt$t < 0), mean(bt$t > 0))
+
+
+{
+    cat('We reject null hypothesis of b1 = 0, with p-value of...\n')
+    cat('...', sprintf(P, fmt = '%.3f'), 'via t-test\n')
+    cat('...', sprintf(P_bt, fmt = '%.3f'), 'via parametric bootstrapping\n')
+    cat('Our b1 estimate is', sprintf(summary(final_mod)$coef[2,1], fmt = '%.3f'))
+}
+
+
+# In case I misinterpreted the plots of b1 bias, I would've gone with a GLMM with
+# bootstrapped P-value
+final_mod_glmer <- glmer(RUGR ~ WINDSPEEDSQR + (1 | ROUTE), data = rg3, family = binomial)
+# bt <- bootMer(final_mod_glmer, function(x){summary(x)$coef[2,1]}, nsim = 1000, 
+#               seed = 88, type = 'parametric', parallel = 'multicore', ncpus = ncpus)
+P_glmer <- 0.002  #2 * min(mean(bt$t < 0), mean(bt$t > 0))
+
+# The answer is the same
+
+
+# I can then make a predictions plot as such:
+bt_fixef <- bootMer(final_mod_glmer, function(x){fixef(x)}, nsim = 1000,
+                    seed = 88, type = 'parametric', parallel = 'multicore', ncpus = ncpus)
+
+slope <- median(coef(final_mod_glmer)$ROUTE$WINDSPEEDSQR)
+intercept <- median(coef(final_mod_glmer)$ROUTE$`(Intercept)`)
+glmm_pred <- function(x, int, slp) {
+    inv_logit(slp * x + int)
+}
+
+ggplot(data = data_frame(X = range(rg3$WINDSPEEDSQR)), aes(X)) + 
+    stat_function(fun = glmm_pred, args = list(int = intercept, slp = slope)) +
+    stat_function(fun = glmm_pred, args = list(
+        int = quantile(bt_fixef$t[,1], probs = 0.025),
+        slp = quantile(bt_fixef$t[,2], probs = 0.025)), linetype = 3) +
+    stat_function(fun = glmm_pred, args = list(
+        int = quantile(bt_fixef$t[,1], probs = 0.975),
+        slp = quantile(bt_fixef$t[,2], probs = 0.975)), linetype = 3) +
+    theme_bw() +
+    xlab(expression(sqrt(Windspeed ~ '(km' ~ hr^-1 * ')'))) +
+    ylab('Probability of detecting ruffed grouse')
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Idea I had at 9pm Sunday:
+# Power curve for route vs station level data
+
+list(
+    rej_route %>% 
+        filter(b1_true %in% seq(0, 0.4, 0.2)) %>% 
+        group_by(method, b1_true) %>% 
+        summarize(rejected = mean(P < 0.05)) %>% 
+        mutate(by = 'route'),
+    rej_station %>% 
+        filter(b1_true %in% seq(0, 0.4, 0.2)) %>% 
+        group_by(method, b1_true) %>% 
+        summarize(rejected = mean(P < 0.05)) %>% 
+        mutate(by = 'station')
+) %>% bind_rows %>% 
+    mutate(mod = factor(paste(by, method, sep = '_'), 
+                        levels = c(
+                            paste(rep('route', 3), c('betab', 'lm', 'qglm'), sep = '_'),
+                            paste(rep('station', 3), c('lmm', 'glmm', 'glmm_boot'), 
+                                  sep = '_')
+                        )
+    )) %>% 
+    # Bad type I error control
+    filter(!mod %in% c('station_glm', 'station_lm', 'route_glm')) %>%
+    ggplot(aes(b1_true, rejected, color = mod, linetype = mod)) +
+    theme_bw() +
+    geom_line() +
+    geom_hline(yintercept = 0.05, linetype = 3) + 
+    scale_color_brewer(type = 'qual', palette = 'Dark2')
+
+
+
+# Hmmm... Maybe I should have stuck with route level models...
+
+
+
+
+
+
+
+
+
+
+
 # 
-# # Moving this file to Box folder...
+# # Moving this file and RData files to Box folder...
 # system(
 #     paste("cd", getwd(),
-#           "&& cp Nell_PS7.R",
+#           "&& cp Nell_PS7.R route_sims.RData station_sims.RData",
 #           "~/'Box Sync/ZooEnt_540_2016/Homework Folders/L_Nell/'")
 # )
