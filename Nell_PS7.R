@@ -330,7 +330,7 @@ sim_bb %>%
 # When the intercept is lower, it makes sense that a model with a higher slope would 
 # better account for points at higher X and Y values.
 
-
+# z-transform can help decouple this correlation
 
 
 
@@ -593,10 +593,12 @@ rej_route %>%
     group_by(method) %>% 
     summarize(rejected = mean(P < 0.05))
 
-# P value for betabinomial ML bootstrap
-set.seed(4)
-2 * mean(boot_test_b1(dbetabinom_LLF, dbetabinom_LLF0, rg3_route$RUGR, rg3_route$STATIONS,
-                      rg3_route$WINDSPEEDSQR, seed = 3, nsims = 1000) < b1_true)
+# # P value for betabinomial ML bootstrap
+# set.seed(4)
+# 2 * mean(boot_test_b1(dbetabinom_LLF, dbetabinom_LLF0, rg3_route$RUGR, 
+#                       rg3_route$STATIONS,
+#                       rg3_route$WINDSPEEDSQR, seed = 3, nsims = 1000) < b1_true)
+# # [1] 0.054
 
 
 # I don't see any major biases (obv lm isn't interpretable here)
@@ -720,6 +722,7 @@ rej_route_ln %>%
 
 
 # Simulate data w with a logitnormal-binomial at the station level
+# `groups` arg should be character vector, NOT factor
 lnorm_b_sim <- function(groups, X, b0, b1, sd) {
     # Inner function to do a single group's simulation
     group_sim <- function(X_i) {
@@ -728,8 +731,12 @@ lnorm_b_sim <- function(groups, X, b0, b1, sd) {
         prob_obs <- inv_logit(b0 + (b1 * X_i) + E)
         rbinom(n = n, size = 1, prob = prob_obs)
     }
-
-    split_list <- split(X, groups)
+    
+    # Since `split` coerces 2nd argument to factor, we must do this to keep it in the 
+    # same order
+    groups_f <- factor(groups, levels = unique(groups))
+    
+    split_list <- split(X, groups_f)
     sim_list <- lapply(split_list, group_sim)
     return(as.numeric(c(sim_list, recursive = TRUE)))
 }
@@ -738,6 +745,8 @@ z_trans <- function(x) {
     z_x <- (x - mean(x)) / sd(x)
     return(z_x)
 }
+
+
 
 
 # Extract model info for route-level models
@@ -787,7 +796,7 @@ comp_methods_station <- function(groups_vec, x_vec, sim_fun, model_ext_fun, ...)
         glmm = glmer(sim_y ~ x_vec + (1 | groups_vec), family = "binomial", nAGQ = 0,
                      control = glmerControl(calc.derivs = FALSE))
         )
-    models[['glmm_boot']] <- models[['glmm']]
+    # models[['glmm_boot']] <- models[['glmm']]
     
     lapply(names(models), model_ext_fun, models = models)
 }
@@ -865,6 +874,7 @@ rej_station %>%
 
 
 
+
 # ----------
 # I'd order these as follows:
 # lmm with approximate t-tests (from lmerTest)
@@ -905,8 +915,8 @@ P_glmer <- 0.002  #2 * min(mean(bt$t < 0), mean(bt$t > 0))
 
 
 # I can then make a predictions plot as such:
-bt_fixef <- bootMer(final_mod_glmer, function(x){fixef(x)}, nsim = 1000,
-                    seed = 88, type = 'parametric', parallel = 'multicore', ncpus = ncpus)
+bt_fixef <- bootMer(final_mod_glmer, function(x){fixef(x)}, nsim = 1000, seed = 88, 
+                    type = 'parametric', parallel = 'multicore', ncpus = ncpus)
 
 slope <- median(coef(final_mod_glmer)$ROUTE$WINDSPEEDSQR)
 intercept <- median(coef(final_mod_glmer)$ROUTE$`(Intercept)`)
@@ -915,7 +925,8 @@ glmm_pred <- function(x, int, slp) {
 }
 
 ggplot(data = data_frame(X = range(rg3$WINDSPEEDSQR)), aes(X)) + 
-    stat_function(fun = glmm_pred, args = list(int = intercept, slp = slope)) +
+    stat_function(fun = glmm_pred, args = list(int = intercept, slp = slope),
+                  size = 1) +
     stat_function(fun = glmm_pred, args = list(
         int = quantile(bt_fixef$t[,1], probs = 0.025),
         slp = quantile(bt_fixef$t[,2], probs = 0.025)), linetype = 3) +
@@ -923,7 +934,7 @@ ggplot(data = data_frame(X = range(rg3$WINDSPEEDSQR)), aes(X)) +
         int = quantile(bt_fixef$t[,1], probs = 0.975),
         slp = quantile(bt_fixef$t[,2], probs = 0.975)), linetype = 3) +
     theme_bw() +
-    xlab(expression(sqrt(Windspeed ~ '(km' ~ hr^-1 * ')'))) +
+    xlab(expression(sqrt(Windspeed ~ '(km' ~ hr^-1 * ') '))) +
     ylab('Probability of detecting ruffed grouse')
 
 
@@ -935,42 +946,6 @@ ggplot(data = data_frame(X = range(rg3$WINDSPEEDSQR)), aes(X)) +
 
 
 
-
-
-
-# Idea I had at 9pm Sunday:
-# Power curve for route vs station level data
-
-list(
-    rej_route %>% 
-        filter(b1_true %in% seq(0, 0.4, 0.2)) %>% 
-        group_by(method, b1_true) %>% 
-        summarize(rejected = mean(P < 0.05)) %>% 
-        mutate(by = 'route'),
-    rej_station %>% 
-        filter(b1_true %in% seq(0, 0.4, 0.2)) %>% 
-        group_by(method, b1_true) %>% 
-        summarize(rejected = mean(P < 0.05)) %>% 
-        mutate(by = 'station')
-) %>% bind_rows %>% 
-    mutate(mod = factor(paste(by, method, sep = '_'), 
-                        levels = c(
-                            paste(rep('route', 3), c('betab', 'lm', 'qglm'), sep = '_'),
-                            paste(rep('station', 3), c('lmm', 'glmm', 'glmm_boot'), 
-                                  sep = '_')
-                        )
-    )) %>% 
-    # Bad type I error control
-    filter(!mod %in% c('station_glm', 'station_lm', 'route_glm')) %>%
-    ggplot(aes(b1_true, rejected, color = mod, linetype = mod)) +
-    theme_bw() +
-    geom_line() +
-    geom_hline(yintercept = 0.05, linetype = 3) + 
-    scale_color_brewer(type = 'qual', palette = 'Dark2')
-
-
-
-# Hmmm... Maybe I should have stuck with route level models...
 
 
 
