@@ -1,0 +1,243 @@
+---
+title: "Rio Grande Minnows"
+subtitle: "Zero-inflated CPUE"
+author: "Lucas A. Nell"
+date: "10/12/2016"
+output:
+    ioslides_presentation:
+        transition: faster
+        widescreen: true
+runtime: shiny
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = FALSE, eval = TRUE)
+library(magrittr)
+library(purrr)
+library(dplyr)
+library(readr)
+library(tidyr)
+library(ggplot2)
+library(grid)
+library(ggthemes)
+library(shiny)
+```
+
+```{r input_data, include = FALSE}
+if (grepl('theor_ecol$', getwd())){
+    setwd('./Pine_dat_1')
+} else if (!grepl('Pine_dat_1$', getwd())) {
+    stop('Unknown directory. It should be in one ending in "theor_ecol" or "Pine_dat_1".')
+}
+catch_df <- read_csv('catch by station.csv') %>% 
+    mutate(cpue = Count / (Area/100),
+           Date = as.Date(paste(Year, Month, '01', sep = '-'), format = '%Y-%m-%d'))
+flow_df <- read_csv('ABQ_discharge.csv') %>% 
+    select(-ABQ_7000) %>% 
+    gather(key = threshold, value = duration, starts_with('ABQ')) %>% 
+    mutate(threshold = as.integer(gsub('ABQ_', '', threshold)))
+get_flow_dur <- function(yr, thresh = 3000) {
+    sapply(yr, 
+           function(y){
+               flow_df$duration[flow_df$Year == y & flow_df$threshold == thresh]
+           })
+}
+```
+
+```{r gg_theme_adverb, include = FALSE}
+# Custom ggplot2 theme
+theme_lan <- function(base_size = 10, base_family = 'Helvetica') {
+    ggthemes::theme_fivethirtyeight(base_size = base_size, 
+                                    base_family = base_family) %+replace%
+        theme(
+            strip.text = element_text(face = 'bold'),
+            axis.title = element_text(size = 11)
+        )
+}
+only_if <- function(condition){
+    function(func) {
+        if (condition) {
+            func
+        } else {
+            function(., ...) .
+        }
+    }
+}
+```
+
+
+
+# Sampling design
+
+## Seine captures
+
+```{r sein_pic, fig.align = 'center', out.width = "800px"}
+seine_pic <- "https://www.army.mil/e2/c/images/2014/08/18/359126/original.jpg"
+knitr::include_graphics(seine_pic)
+```
+
+
+## Sampling effort
+
+```{r area_hist, fig.align = 'center', fig.height = 4, fig.width = 8}
+p <- catch_df %>% 
+    ggplot(aes(Area)) +
+    theme_lan() +
+    geom_histogram(bins = 30, fill = 'dodgerblue3') + 
+    xlab(expression('Area surveyed (' * m^2 * ')'))
+
+p + scale_x_continuous(labels = scales::comma, breaks = seq(2e3, 6e3, 2e3))
+```
+
+
+#### *Does sampling error increase/decrease with sampling area??*
+
+
+## Sampling effort (cont.)
+
+```{r locations_line, fig.align = 'center', fig.height = 4, fig.width = 8}
+catch_df %>%
+    group_by(Date) %>%
+    summarize(stations = n()) %>% 
+    ggplot(aes(Date, stations)) +
+    theme_lan() +
+    geom_line(linetype = 1) +
+    geom_point(size = 2) +
+    scale_x_date() +
+    ylab('Number of locations surveyed') + 
+    xlab('Year')
+```
+
+
+
+# Minnow counts
+
+## A schooling species of minnow...
+
+```{r count_distr}
+radioButtons("trans", label = "Transformation",
+              choices = c('identity', 'log1p', 'log'), selected = 'identity',
+             inline = TRUE)
+radioButtons("zeros", label = "Remove zeros", choices = c(TRUE, FALSE), selected = FALSE,
+             inline = TRUE)
+renderPlot({
+    catch_df %>%
+        only_if(as.logical(input$zeros))(filter)(Count > 0) %>%
+        ggplot(aes(cpue)) +
+        theme_lan() +
+        theme(axis.title.y = element_blank(), axis.text.y = element_blank()) +
+        geom_histogram(bins = 30, fill = 'dodgerblue3') +
+        scale_x_continuous(expression('Minnow counts per' ~ 100 * m^2 ~ 'seined'),
+                           trans = input$trans, breaks = c(0, 50, 100, 200),
+                           labels = scales::comma)
+    }, 
+    width = 800)
+```
+
+
+## CPUE by year
+
+```{r count_by_yr, fig.height = 5, fig.width = 8}
+count_by_yr <- catch_df %>% 
+    ggplot(aes(Date, cpue)) +
+    theme_lan() +
+    geom_point(aes(color = factor(Year)), 
+               position = position_jitter(h = 0, w = 100), alpha = 0.7) +
+    stat_summary(fun.data = "mean_cl_boot", size = 0.375, shape = 0, fill = NA) +
+    scale_y_continuous(expression('Minnow counts per' ~ 100 * m^2 ~ 'seined'),
+                       trans = 'log1p', labels = scales::comma,
+                       breaks = c(10, 20, 50, 100, 200)) +
+    xlab('Year') +
+    theme(legend.position = 'none')
+count_by_yr
+```
+
+
+
+# Water flow
+
+## Flooding {.columns-2}
+
+
+``` {r flood_pic, fig.align = 'left', out.height = "250px"}
+flood_pic <- 'http://www.unm.edu/~cfbyrne/_Media/pulse_02_med_hr.jpeg'
+mtn_pic <- 'https://upload.wikimedia.org/wikipedia/en/b/bc/Organ_Mountains.jpg'
+spawn_pic <- 
+    'https://www.cabq.gov/culturalservices/biopark/aquarium/images/silvery%20minnow2.jpg'
+knitr::include_graphics(mtn_pic)
+knitr::include_graphics(flood_pic)
+```
+
+<br>
+<br>
+<br>
+<br>
+
+
+``` {r flood_pic2, fig.align = 'right', out.width = "400px"}
+knitr::include_graphics(spawn_pic)
+```
+
+
+## Water flow over years
+
+```{r flow_yr, fig.height = 5, fig.width = 8}
+catch_df %>% 
+    ggplot(aes(Year, cpue)) +
+    theme_lan() +
+    stat_summary(fun.data = "mean_cl_boot", size = 0.375, shape = 0, fill = NA) +
+    scale_y_continuous(expression('Minnow counts per' ~ 100 * m^2 ~ 'seined'),
+                       trans = 'log1p', labels = scales::comma,
+                       breaks = c(10, 20, 50, 100, 200)) +
+    xlab('Year') +
+    theme(legend.position = 'none') +
+    geom_line(data = flow_df, inherit.aes = FALSE, 
+              aes(Year, duration))
+
+flow_p <- flow_df %>% 
+    ggplot(aes(Year, duration, fill = factor(threshold))) +
+    theme_lan() +
+    geom_ribbon(aes(ymax = duration), ymin = 0) +
+    ylab("Duration (days)") +
+    scale_fill_manual(expression('Flow threshold (' * ft^3 * s^-1 * ')'),
+                      values = tail(scales::brewer_pal('seq')(7), -1))
+```
+
+
+
+------
+
+```{r flow_cpue, fig.height = 5, fig.width = 8}
+catch_df %>%
+    mutate(duration = get_flow_dur(Year)) %>% 
+    ggplot(aes(duration, cpue)) +
+    theme_lan() +
+    geom_point() +
+    xlab(expression('Days above 3,000' ~ ft^3 * s^-1)) + 
+    scale_y_continuous('CPUE', trans = 'log1p') +
+    geom_smooth(method = 'lm', se = FALSE)
+
+lin_mod <- catch_df %>%
+    mutate(duration = get_flow_dur(Year)) %>% 
+    filter(cpue > 0) %>% 
+    lm(cpue ~ duration, data = .)
+```
+
+
+## Hurdle model?
+
+$Y$ = catch per unit effort
+
+$Z$ = indicator variable: $1$ for $Y > 0$, $0$ for $Y = 0$
+
+$E(Y) = Pr(Z = 1) E(Y | Z = 1)$
+
+$E(Y) = \pi \mu$
+
+Then model $\pi$ with logistic regression
+
+And model $\mu$ with linear model
+
+
+
+
