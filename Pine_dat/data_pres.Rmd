@@ -25,9 +25,9 @@ library(shiny)
 
 ```{r input_data, include = FALSE}
 if (grepl('theor_ecol$', getwd())){
-    setwd('./Pine_dat_1')
-} else if (!grepl('Pine_dat_1$', getwd())) {
-    stop('Unknown directory. It should be in one ending in "theor_ecol" or "Pine_dat_1".')
+    setwd('./Pine_dat')
+} else if (!grepl('Pine_dat$', getwd())) {
+    stop('Unknown directory. It should be in one ending in "theor_ecol" or "Pine_dat".')
 }
 catch_df <- read_csv('catch by station.csv') %>% 
     mutate(cpue = Count / (Area/100),
@@ -182,17 +182,6 @@ knitr::include_graphics(spawn_pic)
 ## Water flow over years
 
 ```{r flow_yr, fig.height = 5, fig.width = 8}
-catch_df %>% 
-    ggplot(aes(Year, cpue)) +
-    theme_lan() +
-    stat_summary(fun.data = "mean_cl_boot", size = 0.375, shape = 0, fill = NA) +
-    scale_y_continuous(expression('Minnow counts per' ~ 100 * m^2 ~ 'seined'),
-                       trans = 'log1p', labels = scales::comma,
-                       breaks = c(10, 20, 50, 100, 200)) +
-    xlab('Year') +
-    theme(legend.position = 'none') +
-    geom_line(data = flow_df, inherit.aes = FALSE, 
-              aes(Year, duration))
 
 flow_p <- flow_df %>% 
     ggplot(aes(Year, duration, fill = factor(threshold))) +
@@ -201,6 +190,7 @@ flow_p <- flow_df %>%
     ylab("Duration (days)") +
     scale_fill_manual(expression('Flow threshold (' * ft^3 * s^-1 * ')'),
                       values = tail(scales::brewer_pal('seq')(7), -1))
+flow_p
 ```
 
 
@@ -221,6 +211,7 @@ lin_mod <- catch_df %>%
     mutate(duration = get_flow_dur(Year)) %>% 
     filter(cpue > 0) %>% 
     lm(cpue ~ duration, data = .)
+
 ```
 
 
@@ -236,7 +227,7 @@ $E(Y) = \pi \mu$
 
 Then model $\pi$ with logistic regression
 
-And model $\mu$ with linear model
+And model $\mu$ with linear regression
 
 
 

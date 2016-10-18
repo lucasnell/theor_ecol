@@ -1,0 +1,45 @@
+---
+title: "Rio Grande minnows data preparation"
+author: "Lucas A. Nell"
+date: "10/18/2016"
+output: html_document
+runtime: shiny
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(eval = TRUE)
+```
+```{r packages}
+library(dplyr)
+library(readr)
+```
+
+```{r check_wd, include = FALSE}
+if (grepl('theor_ecol$', getwd())){
+    setwd('./Pine_dat')
+} else if (!grepl('Pine_dat$', getwd())) {
+    stop('Unknown directory. It should be in one ending in "theor_ecol" or "Pine_dat".')
+}
+```
+
+```{r input_data}
+catch_df <- read_csv('catch by station.csv', col_types = 'iicidii') %>% 
+    select(Year, Station, Count, Area)
+# Rename columns
+colnames(catch_df) <- colnames(catch_df) %>% 
+    tolower()
+
+flow_df <- read_csv('ABQ_discharge.csv', 
+                    col_types = paste(c(rep('i', 10), 'cc'), collapse = '')) %>% 
+    select(Year, starts_with('ABQ_'))
+# Rename columns
+colnames(flow_df) <- colnames(flow_df) %>% 
+    tolower() %>%
+    gsub("abq", "over", .)
+```
+
+```{r write_files, eval = FALSE}
+write_csv(catch_df, 'catch_data.csv')
+write_csv(flow_df, 'flow_data.csv')
+```
+
