@@ -23,7 +23,7 @@ if (grepl('theor_ecol$', getwd())){
 }
 ```
 
-```{r input_data}
+```{r input_new_catches}
 catch_df <- read_csv('by_haul_compiled_07202016.csv.gz', 
                      col_types = paste(rep('c', 44), collapse = '')) %>% 
     select(Station, Reach, RM_Start, Date_Collected, Haul, 
@@ -49,22 +49,62 @@ catch_df <- read_csv('by_haul_compiled_07202016.csv.gz',
 colnames(catch_df) <- colnames(catch_df) %>% 
     tolower()
 
-
-# Getting just HYBAMA minnow counts by station and year
+# Getting just HYBAMA (species code for focal minnow sp.) counts by station and year
 by_station <- catch_df %>% 
     group_by(year, reach, station, haul, rm_start) %>% 
-    summarize(count = sum(count[species_codes == 'HYBAMA'])) %>% 
+    summarize(count = sum(count[species_codes == 'HYBAMA']),
+              area = median(effort)) %>% 
     group_by(year, reach, station, rm_start) %>% 
-    summarize(count = sum(count)) %>% 
+    summarize(count = sum(count), area = sum(area)) %>% 
     ungroup %>% 
     arrange(year, station)
 
 # DF of RMS by station (only 1 value per station; I've checked)
 rms_df <- catch_df %>% group_by(station) %>% summarize(rms = median(rm_start))
+```
 
 
+```{r input_old_catches}
+catch_df_old <- read_csv('catch_by_station_all.csv',
+                         col_types = paste(rep('c', 19), collapse = '')) %>% 
+    select(Station, Reach, RM_Start, `Date Collected`, Year, Month,
+           `Effort m^2`, SumOfSPEC) %>% 
+    # Change weird column names
+    rename(
+        Effort = `Effort m^2`,
+        Date_Collected = `Date Collected`,
+        Count = SumOfSPEC
+    ) %>%
+    # Change column classes
+    mutate_at(vars(RM_Start, Effort), funs(as.numeric)) %>% 
+    mutate_at(vars(Count, Year, Month, Reach), funs(as.integer)) %>% 
+    # Only October sampling
+    filter(Month == 10) %>% 
+    select(-Month)
+# Rename columns to all lowercase
+colnames(catch_df_old) <- colnames(catch_df_old) %>% 
+    tolower()
+```
+
+```{r correct_old_reaches}
+# I determined which number in catch_df_old's reach column corresponded to each 
+# reach from catch_df using the following:
+catch_df_old %>% group_by(reach) %>% 
+    summarize(min = min(rm_start), max = max(rm_start))
+catch_df %>% group_by(reach) %>% 
+    summarize(min = min(rm_start), max = max(rm_start))
+
+# Making reach column the same as for `catch_df`
+catch_df_old <- catch_df_old %>% 
+    mutate(
+        reach = sapply(reach, function(i){c("Angostura", "Isleta", "San Acacia")[i]})
+    )
+```
+
+
+```{r combine_them}
 # Original data frame
-catch_df_og <- read_csv('catch by station.csv', col_types = 'iicidii') %>% 
+catch_df_og <- read_csv('catch_by_station.csv', col_types = 'iicidii') %>% 
     select(Year, Station, Count, Area)
 # Rename columns to all lowercase
 colnames(catch_df_og) <- colnames(catch_df_og) %>% 
@@ -74,25 +114,6 @@ by_station_og <- catch_df_og %>% group_by(year, station) %>%
     summarize(count = sum(count), area = median(area)) %>% 
     ungroup %>% 
     arrange(year, station)
-
-shared_yrs <- unique(by_station$year)[unique(by_station$year) %in% by_station_og$year]
-n_vals <- numeric(length(shared_yrs))
-for (i in seq_along(shared_yrs)) {
-    n_vals[i] <- nrow(by_station_og[by_station_og$year == shared_yrs[i],]) - 
-        nrow(by_station[by_station$year == shared_yrs[i],])
-}
-n_vals
-shared_yrs[n_vals < 0]
-
-yr <- 2010; by_station %>% filter(year == yr); by_station_og %>% filter(year == yr)
-
-by_station_og$station[!by_station_og$station %in% catch_df$station & 
-                          by_station_og$year %in% shared_yrs]
-
-catch_df %>% filter(station == 'RKD14-018')
-
-by_station %>% group_by(reach) %>% 
-    summarize(rm_min = min(rm_start), rm_max = max(rm_start))
 
 # All start with RKD in this one, so I'm removing the column for that
 rm_df <- catch_df %>%
@@ -109,11 +130,27 @@ get_rm <- function(stn) {
     ifelse(length(rm_out) == 0, NA, rm_out)
 }
 
-by_station_og %>% 
+by_station_og <- by_station_og %>% 
     mutate(
         reach = sapply(unique(by_station_og$station), get_reach, USE.NAMES = FALSE),
         rm_start = sapply(unique(by_station_og$station), get_rm, USE.NAMES = FALSE)
     )
+
+shared_yrs <- unique(by_station$year)[unique(by_station$year) %in% by_station_og$year]
+
+all_yrs <- list(
+    by_station %>% filter(!year %in% shared_yrs),
+    by_station_og %>% filter(!year %in% shared_yrs),
+    lapply(shared_yrs, 
+           function(yr, df = by_station, df_og = by_station_og) {
+               new_df <- df %>% filter(year == yr)
+               old_df <- df_og %>% filter(year == yr, !station %in% new_df$station)
+               bind_rows(new_df, old_df)
+           }) %>% bind_rows
+    ) %>% 
+    bind_rows %>% 
+    arrange(year, reach, station)
+
 
 ```
 
@@ -126,20 +163,10 @@ flow_df <- read_csv('ABQ_discharge.csv',
 colnames(flow_df) <- colnames(flow_df) %>% 
     tolower() %>%
     gsub("abq", "over", .)
-
-
-
-catch_df$year %>% unique %>% sort
-flow_df$year %>% unique %>% sort
-by_station_og$year %>% unique %>% sort
-
-
-
-# LEFT OFF --> COMBINING THEM!!
 ```
 
 ```{r write_files, eval = FALSE}
-write_csv(catch_df, 'catch_data.csv')
+write_csv(all_yrs, 'catch_data.csv')
 write_csv(flow_df, 'flow_data.csv')
 ```
 
