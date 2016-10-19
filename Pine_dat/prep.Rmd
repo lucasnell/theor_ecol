@@ -12,6 +12,7 @@ knitr::opts_chunk$set(eval = TRUE)
 ```{r packages}
 library(dplyr)
 library(readr)
+library(tidyr)
 ```
 
 ```{r check_wd, include = FALSE}
@@ -23,12 +24,101 @@ if (grepl('theor_ecol$', getwd())){
 ```
 
 ```{r input_data}
-catch_df <- read_csv('catch by station.csv', col_types = 'iicidii') %>% 
-    select(Year, Station, Count, Area)
-# Rename columns
+catch_df <- read_csv('by_haul_compiled_07202016.csv.gz', 
+                     col_types = paste(rep('c', 44), collapse = '')) %>% 
+    select(Station, Reach, RM_Start, Date_Collected, Haul, 
+           `Effort_m^2`, Species_Codes, SumOfSPEC, AgeClass, Larval) %>% 
+    # Change weird column names
+    rename(
+        Effort = `Effort_m^2`,
+        Count = SumOfSPEC,
+        Age_Class = AgeClass
+    ) %>%
+    # Change column classes
+    mutate_at(vars(RM_Start, Effort, Date_Collected), funs(as.numeric)) %>% 
+    mutate(
+        Date_Collected = as.Date(Date_Collected, origin = "1899-12-30"),
+        Count = as.integer(Count),
+        Year = as.integer(format(Date_Collected, '%Y')),
+        Month = as.integer(format(Date_Collected, '%m'))
+    ) %>% 
+    # Only October sampling
+    filter(Month == 10) %>% 
+    select(-Month)
+# Rename columns to all lowercase
 colnames(catch_df) <- colnames(catch_df) %>% 
     tolower()
 
+
+# Getting just HYBAMA minnow counts by station and year
+by_station <- catch_df %>% 
+    group_by(year, reach, station, haul, rm_start) %>% 
+    summarize(count = sum(count[species_codes == 'HYBAMA'])) %>% 
+    group_by(year, reach, station, rm_start) %>% 
+    summarize(count = sum(count)) %>% 
+    ungroup %>% 
+    arrange(year, station)
+
+# DF of RMS by station (only 1 value per station; I've checked)
+rms_df <- catch_df %>% group_by(station) %>% summarize(rms = median(rm_start))
+
+
+# Original data frame
+catch_df_og <- read_csv('catch by station.csv', col_types = 'iicidii') %>% 
+    select(Year, Station, Count, Area)
+# Rename columns to all lowercase
+colnames(catch_df_og) <- colnames(catch_df_og) %>% 
+    tolower()
+# Combine by station
+by_station_og <- catch_df_og %>% group_by(year, station) %>% 
+    summarize(count = sum(count), area = median(area)) %>% 
+    ungroup %>% 
+    arrange(year, station)
+
+shared_yrs <- unique(by_station$year)[unique(by_station$year) %in% by_station_og$year]
+n_vals <- numeric(length(shared_yrs))
+for (i in seq_along(shared_yrs)) {
+    n_vals[i] <- nrow(by_station_og[by_station_og$year == shared_yrs[i],]) - 
+        nrow(by_station[by_station$year == shared_yrs[i],])
+}
+n_vals
+shared_yrs[n_vals < 0]
+
+yr <- 2010; by_station %>% filter(year == yr); by_station_og %>% filter(year == yr)
+
+by_station_og$station[!by_station_og$station %in% catch_df$station & 
+                          by_station_og$year %in% shared_yrs]
+
+catch_df %>% filter(station == 'RKD14-018')
+
+by_station %>% group_by(reach) %>% 
+    summarize(rm_min = min(rm_start), rm_max = max(rm_start))
+
+# All start with RKD in this one, so I'm removing the column for that
+rm_df <- catch_df %>%
+    mutate(num = as.numeric(substr(station, 7,9)),
+           mid = as.numeric(substr(station,4,5))) %>% 
+    distinct(station, num, mid, reach, rm_start)
+
+get_reach <- function(stn) {
+    reach_out <- rm_df$reach[rm_df$station == stn]
+    ifelse(length(reach_out) == 0, NA, reach_out)
+}
+get_rm <- function(stn) {
+    rm_out <- rm_df$rm_start[rm_df$station == stn]
+    ifelse(length(rm_out) == 0, NA, rm_out)
+}
+
+by_station_og %>% 
+    mutate(
+        reach = sapply(unique(by_station_og$station), get_reach, USE.NAMES = FALSE),
+        rm_start = sapply(unique(by_station_og$station), get_rm, USE.NAMES = FALSE)
+    )
+
+```
+
+
+```{r input_flow}
 flow_df <- read_csv('ABQ_discharge.csv', 
                     col_types = paste(c(rep('i', 10), 'cc'), collapse = '')) %>% 
     select(Year, starts_with('ABQ_'))
@@ -36,6 +126,16 @@ flow_df <- read_csv('ABQ_discharge.csv',
 colnames(flow_df) <- colnames(flow_df) %>% 
     tolower() %>%
     gsub("abq", "over", .)
+
+
+
+catch_df$year %>% unique %>% sort
+flow_df$year %>% unique %>% sort
+by_station_og$year %>% unique %>% sort
+
+
+
+# LEFT OFF --> COMBINING THEM!!
 ```
 
 ```{r write_files, eval = FALSE}
