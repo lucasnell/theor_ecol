@@ -2,12 +2,14 @@
 title: "Rio Grande minnows data preparation"
 author: "Lucas A. Nell"
 date: "10/18/2016"
-output: html_document
+output:
+  html_document:
+    highlight: haddock
 runtime: shiny
 ---
 
 ```{r setup, include = FALSE}
-knitr::opts_chunk$set(eval = TRUE)
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE, comment = '', prompt = FALSE)
 ```
 ```{r packages}
 library(dplyr)
@@ -26,7 +28,7 @@ if (grepl('theor_ecol$', getwd())){
 ```{r input_new_catches}
 catch_df <- read_csv('by_haul_compiled_07202016.csv.gz', 
                      col_types = paste(rep('c', 44), collapse = '')) %>% 
-    select(Station, Reach, RM_Start, Date_Collected, Haul, 
+    select(Station, Reach, RM_Start, Date_Collected, Haul, Isolated_Pools,
            `Effort_m^2`, Species_Codes, SumOfSPEC, AgeClass, Larval) %>% 
     # Change weird column names
     rename(
@@ -37,6 +39,7 @@ catch_df <- read_csv('by_haul_compiled_07202016.csv.gz',
     # Change column classes
     mutate_at(vars(RM_Start, Effort, Date_Collected), funs(as.numeric)) %>% 
     mutate(
+        Isolated_Pools = as.integer(ifelse(is.na(Isolated_Pools), 0, Isolated_Pools)),
         Date_Collected = as.Date(Date_Collected, origin = "1899-12-30"),
         Count = as.integer(Count),
         Year = as.integer(format(Date_Collected, '%Y')),
@@ -53,11 +56,12 @@ colnames(catch_df) <- colnames(catch_df) %>%
 by_station <- catch_df %>% 
     group_by(year, reach, station, haul, rm_start) %>% 
     summarize(count = sum(count[species_codes == 'HYBAMA']),
-              area = median(effort)) %>% 
+              area = median(effort),
+              isolated_pools = sum(isolated_pools)) %>% 
     group_by(year, reach, station, rm_start) %>% 
-    summarize(count = sum(count), area = sum(area)) %>% 
+    summarize_at(vars(count, area, isolated_pools), funs(sum), na.rm = TRUE) %>% 
     ungroup %>% 
-    arrange(year, station)
+    arrange(year, reach, rm_start, station)
 
 # DF of RMS by station (only 1 value per station; I've checked)
 rms_df <- catch_df %>% group_by(station) %>% summarize(rms = median(rm_start))
@@ -68,7 +72,7 @@ rms_df <- catch_df %>% group_by(station) %>% summarize(rms = median(rm_start))
 catch_df_old <- read_csv('catch_by_station_all.csv',
                          col_types = paste(rep('c', 19), collapse = '')) %>% 
     select(Station, Reach, RM_Start, `Date Collected`, Year, Month,
-           `Effort m^2`, SumOfSPEC) %>% 
+           `Effort m^2`, SumOfSPEC, Isolated_Pools) %>% 
     # Change weird column names
     rename(
         Effort = `Effort m^2`,
@@ -78,6 +82,9 @@ catch_df_old <- read_csv('catch_by_station_all.csv',
     # Change column classes
     mutate_at(vars(RM_Start, Effort), funs(as.numeric)) %>% 
     mutate_at(vars(Count, Year, Month, Reach), funs(as.integer)) %>% 
+    mutate(
+        Isolated_Pools = as.integer(ifelse(is.na(Isolated_Pools), 0, Isolated_Pools))
+    ) %>% 
     # Only October sampling
     filter(Month == 10) %>% 
     select(-Month)
@@ -99,59 +106,60 @@ catch_df_old <- catch_df_old %>%
     mutate(
         reach = sapply(reach, function(i){c("Angostura", "Isleta", "San Acacia")[i]})
     )
+# When multiple rows match to the same year and station, they also have the same
+# effort, which tells me they were likely originally just counted separately, but 
+# were from the same haul. So I'll sum the counts, but not the effort for these.
+by_station_old <- catch_df_old %>% 
+    # I'm grouping by effort rather than station bc effort appears to be more unique
+    # once grouping by year, reach, and rm_start is done
+    group_by(year, reach, rm_start, effort) %>% 
+    summarize(count = sum(count), isolated_pools = sum(isolated_pools), 
+              station = station[1]) %>% 
+    ungroup %>% 
+    rename(area = effort) %>% 
+    arrange(year, reach, rm_start, station)
 ```
 
 
-```{r combine_them}
-# Original data frame
-catch_df_og <- read_csv('catch_by_station.csv', col_types = 'iicidii') %>% 
-    select(Year, Station, Count, Area)
-# Rename columns to all lowercase
-colnames(catch_df_og) <- colnames(catch_df_og) %>% 
-    tolower()
-# Combine by station
-by_station_og <- catch_df_og %>% group_by(year, station) %>% 
-    summarize(count = sum(count), area = median(area)) %>% 
-    ungroup %>% 
-    arrange(year, station)
-
-# All start with RKD in this one, so I'm removing the column for that
-rm_df <- catch_df %>%
-    mutate(num = as.numeric(substr(station, 7,9)),
-           mid = as.numeric(substr(station,4,5))) %>% 
-    distinct(station, num, mid, reach, rm_start)
-
-get_reach <- function(stn) {
-    reach_out <- rm_df$reach[rm_df$station == stn]
-    ifelse(length(reach_out) == 0, NA, reach_out)
-}
-get_rm <- function(stn) {
-    rm_out <- rm_df$rm_start[rm_df$station == stn]
-    ifelse(length(rm_out) == 0, NA, rm_out)
+```{r updating_stations}
+# Updating stations
+get_station <- function(rm, stn_old, rm_df = catch_df) {
+    stn_out <- unique(rm_df$station[rm_df$rm_start == rm])
+    ifelse(length(stn_out) == 0, stn_old, stn_out)
 }
 
-by_station_og <- by_station_og %>% 
+# Only these 4 rm_start values weren't present in the later dataset
+unk_rm <- unique(by_station_old$rm_start[!by_station_old$rm_start %in%
+                                             by_station$rm_start])
+unk_rm
+
+# Updating all station numbers except for those coinciding with above rm_start in unk_rm
+by_station_old <- by_station_old %>% 
     mutate(
-        reach = sapply(unique(by_station_og$station), get_reach, USE.NAMES = FALSE),
-        rm_start = sapply(unique(by_station_og$station), get_rm, USE.NAMES = FALSE)
-    )
+        station = 
+            mapply(FUN = get_station, rm_start, station)
+    ) %>% 
+    # For easier comparison to by_station
+    select(one_of(colnames(by_station)))
+```
 
-shared_yrs <- unique(by_station$year)[unique(by_station$year) %in% by_station_og$year]
+```{r combining_dfs}
+shared_yrs <- unique(by_station$year)[unique(by_station$year) %in% 
+                                          by_station_old$year]
 
+# Finally combining both datasets
 all_yrs <- list(
     by_station %>% filter(!year %in% shared_yrs),
-    by_station_og %>% filter(!year %in% shared_yrs),
+    by_station_old %>% filter(!year %in% shared_yrs),
     lapply(shared_yrs, 
-           function(yr, df = by_station, df_og = by_station_og) {
-               new_df <- df %>% filter(year == yr)
-               old_df <- df_og %>% filter(year == yr, !station %in% new_df$station)
+           function(y, df = by_station, df_old = by_station_old) {
+               new_df <- df %>% filter(year == y)
+               old_df <- df_old %>% filter(year == y, !rm_start %in% new_df$rm_start)
                bind_rows(new_df, old_df)
            }) %>% bind_rows
     ) %>% 
     bind_rows %>% 
-    arrange(year, reach, station)
-
-
+    arrange(year, reach, rm_start, station)
 ```
 
 
@@ -167,6 +175,6 @@ colnames(flow_df) <- colnames(flow_df) %>%
 
 ```{r write_files, eval = FALSE}
 write_csv(all_yrs, 'catch_data.csv')
-write_csv(flow_df, 'flow_data.csv')
+# write_csv(flow_df, 'flow_data.csv') # No longer using this one
 ```
 
