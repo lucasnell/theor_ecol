@@ -295,33 +295,18 @@ typeI %>%
     summarize(rejected = mean(p < 0.05))
 
 
-# ggplot(d, )
 
 
-arima(X, order = c(1,0,0), xreg = U)
+# arima(X, order = c(1,0,0), xreg = U)
 
 
-# Power analysis is pretty pointless since there's type I error issues...
-# # ----------------
-# # Power
-# # ----------------
-# 
-# 
-# 
-# combo_df <- expand.grid(a1 = seq(0, 0.75, 0.25), b1 = seq(0.1, 0.3, 0.1))
-# 
-# powers <- data_frame(a1 = rep(combo_df$a1, each = 1000),
-#                      b1 = rep(combo_df$b1, each = 1000))
-# set.seed(888)
-# powers$p <- do.call(c, mapply(minnow_sim, a1 = combo_df$a1, b1 = combo_df$b1, 
-#                               SIMPLIFY = FALSE))
-# 
-# powers %>% 
-#     group_by(a1, b1) %>% 
-#     summarize(rejected = mean(p < 0.05)) %>% 
-#     ungroup %>% 
-#     ggplot(aes(b1, rejected, color = factor(a1))) + 
-#     geom_line()
+
+
+
+
+
+
+
 
 
 

@@ -23,6 +23,9 @@ theme_lan <- function(base_size = 10, base_family = 'Helvetica') {
 }
 
 
+# obligatory floating egg stage --> lots of mixing, perhaps big floods are bad
+
+
 catch_df <- read_csv('catch_data.csv', col_types = 'iccdidi') %>% 
     mutate(area = ifelse(area == 0, NA, area)) %>% 
     filter(isolated_pools == 0) %>% 
